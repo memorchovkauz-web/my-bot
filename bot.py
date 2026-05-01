@@ -5,6 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 from datetime import datetime, timedelta
 
 import os
+import json
 
 TOKEN = os.getenv("BOT_TOKEN")
 
