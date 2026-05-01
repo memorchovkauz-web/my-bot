@@ -21,9 +21,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-
-import os
-import json
 from google.oauth2.service_account import Credentials
 
 creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
