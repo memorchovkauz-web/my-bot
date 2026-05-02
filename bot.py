@@ -1171,7 +1171,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if query.data.startswith("reject|"):
+     if query.data.startswith("reject|"):
         car = query.data.split("|", 1)[1]
         context.user_data["reject_car"] = car
         context.user_data["mode"] = "reject_reason"
@@ -1181,9 +1181,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
         
- if query.data.startswith("car|"):
-     car = query.data.split("|", 1)[1]
-     mode = context.user_data.get("mode")
+     if query.data.startswith("car|"):
+         car = query.data.split("|", 1)[1]
+         mode = context.user_data.get("mode")
 
      if mode == "choose_car":
         context.user_data["car"] = car
