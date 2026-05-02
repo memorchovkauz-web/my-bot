@@ -976,12 +976,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode == "write_km":
+        if not text.isdigit() or not (1 <= len(text) <= 8):
+            await update.message.reply_text(
+                "❌ Фақат 1–8 хонали рақам киритинг!",
+                reply_markup=back_keyboard()
+            )
+            return
+
         context.user_data["km"] = text
         context.user_data["mode"] = "send_km_photo"
 
         await update.message.reply_text(
-            "✅ КМ/моточас сақланди.\n\n"
-            "Энди одометр ёки моточас расмини юборинг."
+            "📷 ОДОМЕТР РАСМИНИ ЮБОРИНГ",
+            reply_markup=back_keyboard()
         )
         return
 
