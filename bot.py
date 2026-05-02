@@ -3,6 +3,7 @@ from google.oauth2.service_account import Credentials
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import os
 import json
@@ -57,7 +58,7 @@ STATUS_ORDER = {
 
 
 def now_text():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def calculate_duration(start_time, end_time):
@@ -186,6 +187,12 @@ def edit_keyboard():
         [InlineKeyboardButton("🎥 Видео", callback_data="edit|video")],
     ])
 
+
+def edit_keyboard_remove():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📝 Изоҳ", callback_data="edit|note")],
+        [InlineKeyboardButton("🎥 Видео", callback_data="edit|video")]
+    ])
 
 def get_all_cars():
     return mashina_ws.get_all_values()[1:]
@@ -332,8 +339,50 @@ def get_last_open_repair_start_time(car):
 
 def get_last_repair_pair(car):
     rows = remont_ws.get_all_values()[1:]
-    kirgan = None
+
     chiqqan = None
+    kirgan_list = []
+
+    for row in reversed(rows):
+        if len(row) < 13:
+            continue
+
+        if row[2].strip().lower() != car.strip().lower():
+            continue
+
+        if row[5].strip() == "Текширувда":
+            chiqqan = row
+            break
+
+    if not chiqqan:
+        return [], None
+
+    found_exit = False
+
+    for row in reversed(rows):
+        if len(row) < 13:
+            continue
+
+        if row[2].strip().lower() != car.strip().lower():
+            continue
+
+        if row == chiqqan:
+            found_exit = True
+            continue
+
+        if not found_exit:
+            continue
+
+        status = row[5].strip()
+
+        if status in ["Текширувда", "Соз"]:
+            break
+
+        if status == "Носоз":
+            kirgan_list.append(row)
+
+    kirgan_list.reverse()
+    return kirgan_list, chiqqan
 
     for row in reversed(rows):
         if len(row) < 13:
@@ -567,6 +616,8 @@ async def notify_technadzor_for_check(context, car):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+
     role = get_role(update)
 
     if role not in ["director", "mechanic", "technadzor", "slesar"]:
@@ -577,6 +628,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🧑‍🔍 Текширувчи менюси:",
             reply_markup=technadzor_keyboard()
+        )
+        return
+
+    if role == "mechanic":
+        await update.message.reply_text(
+            "🔧 Механик менюси\n\nАввал фирмани танланг:",
+            reply_markup=firm_keyboard()
+        )
+        return
+
+    if role == "slesar":
+        await update.message.reply_text(
+            "🛠 Слесарь менюси\n\nАввал фирмани танланг:",
+            reply_markup=firm_keyboard()
+        )
+        return
+
+    if role == "director":
+        await update.message.reply_text(
+            "👨‍💼 Директор менюси\n\nАввал фирмани танланг:",
+            reply_markup=firm_keyboard()
         )
         return
 
@@ -920,15 +992,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data == "final_confirm":
-        await save_final_data(update, context, query.message)
-        return
+    await query.edit_message_reply_markup(reply_markup=None)
+    await save_final_data(update, context, query.message)
+    return
 
     if query.data == "final_edit":
-        await query.message.reply_text(
-            "Қайсини таҳрирлайсиз?",
-            reply_markup=edit_keyboard()
-        )
-        return
+        if context.user_data.get("operation") == "remove":
+        keyboard = edit_keyboard_remove()
+    else:
+        keyboard = edit_keyboard()
+
+    await query.message.reply_text(
+        "Қайсини таҳрирлайсиз?",
+        reply_markup=keyboard
+    )
+    return
 
     if query.data.startswith("edit|"):
         field = query.data.split("|", 1)[1]
@@ -974,7 +1052,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data.startswith("check_detail|"):
         car = query.data.split("|", 1)[1]
-        kirgan, chiqqan = get_last_repair_pair(car)
+        kirgan_list, chiqqan = get_last_repair_pair(car)
 
         if not chiqqan:
             await query.message.reply_text("❌ Ремонтдан чиқариш маълумоти топилмади.")
@@ -982,15 +1060,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text = f"🚛 Техника: {car}\n🚜 Тури: {get_car_type(car)}\n\n"
 
-        if kirgan:
-            text += (
-                "🔴 РЕМОНТГА КИРГАН\n"
-                f"📅 Сана ва вақт: {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
-                f"⏱ КМ/Моточас: {kirgan[3] if len(kirgan) > 3 else ''}\n"
-                f"🔧 Ремонт тури: {kirgan[4] if len(kirgan) > 4 else ''}\n"
-                f"📝 Изоҳ: {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n"
-                f"👤 Киритган: {kirgan[9] if len(kirgan) > 9 else ''}\n\n"
-            )
+        if kirgan_list:
+           text += "🔴 РЕМОНТГА КИРГАНЛАР:\n\n"
+
+           for kirgan in kirgan_list:
+               text += (
+            f"📅 {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
+            f"⏱ {kirgan[3] if len(kirgan) > 3 else ''}\n"
+            f"🔧 {kirgan[4] if len(kirgan) > 4 else ''}\n"
+            f"📝 {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n\n"
+        )
 
         text += (
             "🟡 РЕМОНТДАН ЧИҚҚАН\n"
