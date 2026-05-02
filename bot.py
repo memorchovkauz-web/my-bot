@@ -1177,9 +1177,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ {car} текширувдан ўтмади.\n\nСабабини ёзинг:"
         )
         return
-
-        car = query.data.split("|", 1)[1]
-        mode = context.user_data.get("mode")
+        
+ if query.data.startswith("car|"):
+     car = query.data.split("|", 1)[1]
+     mode = context.user_data.get("mode")
 
      if mode == "choose_car":
         context.user_data["car"] = car
@@ -1195,8 +1196,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔧 Ремонт тури: {repair_type}\n\n"
             "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>",
             parse_mode="HTML"
-        )
-        return
+            )
+            return
 
     if mode == "remove_car":
         context.user_data["car"] = car
