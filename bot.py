@@ -710,6 +710,12 @@ async def save_final_data(update_or_query, context, message_obj):
     if operation == "remove":
         await notify_technadzor_for_check(context, car)
 
+    try:
+        if hasattr(update_or_query, "callback_query") and update_or_query.callback_query:
+            await update_or_query.callback_query.message.edit_reply_markup(reply_markup=None)
+    except:
+        pass
+    
     await message_obj.reply_text(
         f"✅ Маълумот сақланди.\n\n"
         f"🚛 Техника: {car}\n"
