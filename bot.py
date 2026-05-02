@@ -813,13 +813,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "⬅️ Орқага":
+        context.user_data.clear()
+
         if role == "technadzor":
-            context.user_data.clear()
-        await update.message.reply_text(
-            "Текширувчи менюси:",
-            reply_markup=technadzor_keyboard()
-        )
-        return
+            await update.message.reply_text(
+                "🧑‍🔍 Текширувчи менюси:",
+                reply_markup=technadzor_keyboard()
+            )
+            return
+
+        if role == "mechanic":
+            await update.message.reply_text(
+                "🔧 Механик менюси\n\nАввал фирмани танланг:",
+                reply_markup=firm_keyboard()
+            )
+            return
+
+        if role == "slesar":
+            await update.message.reply_text(
+                "🛠 Слесарь менюси\n\nАввал фирмани танланг:",
+                reply_markup=firm_keyboard()
+            )
+            return
+
+        if role == "director":
+            await update.message.reply_text(
+                "👨‍💼 Директор менюси\n\nАввал фирмани танланг:",
+                reply_markup=firm_keyboard()
+            )
+            return
 
         if mode == "choose_repair_type":
             context.user_data["mode"] = None
