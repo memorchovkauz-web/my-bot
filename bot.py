@@ -994,7 +994,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "final_confirm":
         await save_final_data(update, context, query.message)
         await query.edit_message_reply_markup(reply_markup=None)
-    return
+        return
 
     if query.data == "final_edit":
         if context.user_data.get("operation") == "remove":
