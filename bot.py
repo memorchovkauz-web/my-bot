@@ -983,8 +983,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data == "final_confirm":
-        await query.edit_message_reply_markup(reply_markup=None)
         await save_final_data(update, context, query.message)
+
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except:
+            pass
+
+        await query.answer("Сақланди ✅")
         return
 
     if query.data == "final_edit":
