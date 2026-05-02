@@ -806,24 +806,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if mode == "edit_note":
-        context.user_data["note"] = text
-        context.user_data["mode"] = "final_check"
-
-        await update.message.reply_text(
-            "✅ Изоҳ янгиланди.",
-            reply_markup=final_confirm_keyboard()
-        )
-        return
-
     if text == "⬅️ Орқага":
         if role == "technadzor":
             context.user_data.clear()
-            await update.message.reply_text(
-                "Текширувчи менюси:",
-                reply_markup=technadzor_keyboard()
-            )
-            return
+        await update.message.reply_text(
+            "Текширувчи менюси:",
+            reply_markup=technadzor_keyboard()
+        )
+        return
 
         if mode == "choose_repair_type":
             context.user_data["mode"] = None
