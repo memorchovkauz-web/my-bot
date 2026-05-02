@@ -1040,6 +1040,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML"
             )
             return
+
+       if mode == "remove_car":
+            context.user_data["car"] = car
+            context.user_data["mode"] = "write_note_remove"
+
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\n\n"
+                "Қилинган иш бўйича изоҳ ёзинг:"
+            )
+            return
     if query.data.startswith("edit|"):
         field = query.data.split("|", 1)[1]
 
