@@ -384,27 +384,6 @@ def get_last_repair_pair(car):
     kirgan_list.reverse()
     return kirgan_list, chiqqan
 
-    for row in reversed(rows):
-        if len(row) < 13:
-            continue
-
-        if row[2].strip().lower() != car.strip().lower():
-            continue
-
-        status = row[5].strip()
-
-        if status == "Текширувда" and chiqqan is None:
-            chiqqan = row
-
-        elif status == "Носоз" and kirgan is None:
-            kirgan = row
-
-        if kirgan and chiqqan:
-            break
-
-    return kirgan, chiqqan
-
-
 async def send_last_repairs(query, car, repair_type):
     rows = remont_ws.get_all_values()[1:]
     result = []
@@ -556,21 +535,19 @@ async def send_history_by_date(message, car, start_date, end_date):
 
 
 async def notify_technadzor_for_check(context, car):
-    kirgan, chiqqan = get_last_repair_pair(car)
+    kirgan_list, chiqqan = get_last_repair_pair(car)
 
     if not chiqqan:
         return
 
     text = f"🚛 Техника: {car}\n🚜 Тури: {get_car_type(car)}\n\n"
 
-    if kirgan:
-        text += (
-            "🔴 РЕМОНТГА КИРГАН\n"
-            f"📅 Сана ва вақт: {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
-            f"⏱ КМ/Моточас: {kirgan[3] if len(kirgan) > 3 else ''}\n"
-            f"🔧 Ремонт тури: {kirgan[4] if len(kirgan) > 4 else ''}\n"
-            f"📝 Изоҳ: {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n"
-            f"👤 Киритган: {kirgan[9] if len(kirgan) > 9 else ''}\n\n"
+    for kirgan in kirgan_list:
+         text += (
+            f"📅 {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
+            f"⏱ {kirgan[3] if len(kirgan) > 3 else ''}\n"
+            f"🔧 {kirgan[4] if len(kirgan) > 4 else ''}\n"
+            f"📝 {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n\n"
         )
 
     text += (
