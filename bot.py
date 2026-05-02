@@ -1012,8 +1012,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard,
             parse_mode="HTML"
         )
-    return
+        return
+ 
+    if query.data.startswith("car|"):
+        car = query.data.split("|", 1)[1]
+        mode = context.user_data.get("mode")
 
+        if mode == "choose_car":
+            context.user_data["car"] = car
+            repair_type = context.user_data.get("repair_type")
+
+            await send_last_repairs(query, car, repair_type)
+
+            context.user_data["mode"] = "write_km"
+
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\n"
+                f"🔧 Ремонт тури: {repair_type}\n\n"
+                "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>",
+                parse_mode="HTML"
+            )
+            return
     if query.data.startswith("edit|"):
         field = query.data.split("|", 1)[1]
 
@@ -1144,17 +1164,27 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query.data.startswith("car|"):
         return
 
-    car = query.data.split("|", 1)[1]
-    mode = context.user_data.get("mode")
+        car = query.data.split("|", 1)[1]
+        mode = context.user_data.get("mode")
 
-    if mode == "history_select_car":
-        context.user_data["history_car"] = car
-        context.user_data["mode"] = "history_period"
+    if mode == "choose_car":
+        context.user_data["car"] = car
+        repair_type = context.user_data.get("repair_type")
+
+        await send_last_repairs(query, car, repair_type)
+
+        context.user_data["mode"] = "write_km"
 
         await query.message.reply_text(
-            f"🚛 Техника: {car}\n\n"
-            "Қайси давр бўйича история керак?",
-            reply_markup=history_period_keyboard()
+            f"🚛 Техника: {car}\n"
+            f"🏢 Фирма: {context.user_data.get('firm')}\n"
+            f"🔧 Ремонт тури: {repair_type}\n\n"
+            "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>\n\n"
+            "Мисол:\n"
+            "125000 км\n"
+            "ёки\n"
+            "8500 моточас",
+            parse_mode="HTML"
         )
         return
 
