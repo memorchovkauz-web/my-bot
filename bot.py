@@ -1178,13 +1178,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if not query.data.startswith("car|"):
-        return
-
         car = query.data.split("|", 1)[1]
         mode = context.user_data.get("mode")
 
-    if mode == "choose_car":
+     if mode == "choose_car":
         context.user_data["car"] = car
         repair_type = context.user_data.get("repair_type")
 
@@ -1196,32 +1193,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🚛 Техника: {car}\n"
             f"🏢 Фирма: {context.user_data.get('firm')}\n"
             f"🔧 Ремонт тури: {repair_type}\n\n"
-            "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>\n\n"
-            "Мисол:\n"
-            "125000 км\n"
-            "ёки\n"
-            "8500 моточас",
+            "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>",
             parse_mode="HTML"
-        )
-        return
-
-    if mode == "choose_car":
-        context.user_data["car"] = car
-        repair_type = context.user_data.get("repair_type")
-
-        await send_last_repairs(query, car, repair_type)
-
-        context.user_data["mode"] = "write_km"
-
-        await query.message.reply_text(
-            f"🚛 Техника: {car}\n"
-            f"🏢 Фирма: {context.user_data.get('firm')}\n"
-            f"🔧 Ремонт тури: {repair_type}\n\n"
-            "Юрган масофа ёки ишлаган соатни ёзинг.\n\n"
-            "Мисол:\n"
-            "125000 км\n"
-            "ёки\n"
-            "8500 моточас"
         )
         return
 
