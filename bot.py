@@ -795,13 +795,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["reject_car"] = None
         return
 
-    if mode == "edit_km":
-        context.user_data["km"] = text
+    if mode == "edit_note":
+        context.user_data["note"] = text
         context.user_data["mode"] = "final_check"
 
         await update.message.reply_text(
-            "✅ КМ/моточас янгиланди.",
-            reply_markup=final_confirm_keyboard()
+            "✅ Изоҳ янгиланди.\n\n🔴 <b>Маълумотни тасдиқлайсизми?</b>",
+            reply_markup=final_confirm_keyboard(),
+            parse_mode="HTML"
         )
         return
 
@@ -992,19 +993,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data == "final_confirm":
-        await query.edit_message_reply_markup(reply_markup=None)  # 👈 кнопкани ўчиради
+        await query.edit_message_reply_markup(reply_markup=None)
         await save_final_data(update, context, query.message)
         return
 
     if query.data == "final_edit":
+        await query.edit_message_reply_markup(reply_markup=None)
+
         if context.user_data.get("operation") == "remove":
             keyboard = edit_keyboard_remove()
         else:
             keyboard = edit_keyboard()
 
         await query.message.reply_text(
-            "Қайсини таҳрирлайсиз?",
-            reply_markup=keyboard
+            "🔴 <b>Қайсини таҳрирлайсиз?</b>",
+            reply_markup=keyboard,
+            parse_mode="HTML"
         )
         return
 
@@ -1230,8 +1234,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "final_check"
 
         await update.message.reply_text(
-            "✅ Видео янгиланди.",
-            reply_markup=final_confirm_keyboard()
+            "✅ Видео янгиланди.\n\n🔴 <b>Маълумотни тасдиқлайсизми?</b>",
+            reply_markup=final_confirm_keyboard(),
+            parse_mode="HTML"
         )
         return
 
