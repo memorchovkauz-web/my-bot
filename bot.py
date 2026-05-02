@@ -845,8 +845,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["mode"] = "select_firm_for_add"
 
             await update.message.reply_text(
-                "Фирмани танланг:",
-                reply_markup=firm_keyboard()
+                "🔴 <b>Фирмани танланг:</b>",
+                parse_mode="HTML"
             )
             return
 
