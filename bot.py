@@ -1006,11 +1006,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = edit_keyboard()
 
         await query.message.reply_text(
-            "🔴 <b>Қайсини таҳрирлайсиз?</b>",
+            "🔴 <b>Қайси маълумотни таҳрирлайсиз?</b>",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
-        return
+    return
 
     if query.data.startswith("edit|"):
         field = query.data.split("|", 1)[1]
