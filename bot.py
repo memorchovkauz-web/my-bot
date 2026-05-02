@@ -998,15 +998,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "final_edit":
         if context.user_data.get("operation") == "remove":
-        keyboard = edit_keyboard_remove()
-    else:
-        keyboard = edit_keyboard()
+            keyboard = edit_keyboard_remove()
+        else:
+            keyboard = edit_keyboard()
 
-    await query.message.reply_text(
-        "Қайсини таҳрирлайсиз?",
-        reply_markup=keyboard
-    )
-    return
+        await query.message.reply_text(
+            "Қайсини таҳрирлайсиз?",
+            reply_markup=keyboard
+        )
+        return
 
     if query.data.startswith("edit|"):
         field = query.data.split("|", 1)[1]
