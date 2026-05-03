@@ -695,21 +695,21 @@ async def save_final_data(update_or_query, context, message_obj):
     row_id = len(remont_ws.get_all_values())
 
     remont_ws.append_row([
-        row_id,
-        current_time,
-        car,
-        km,
-        amal,
-        status,
-        note,
-        video_id,
-        km_photo_id,
-        added_by,
-        repair_start_time,
-        repair_end_time,
-        repair_duration,
-        executor_id
-    ])
+        row_id,              # A
+        current_time,        # B
+        car,                 # C
+        km,                  # D
+        amal,                # E
+        status,              # F
+        note,                # G
+        video_id,            # H
+        km_photo_id,         # I
+        added_by,            # J
+        repair_start_time,   # K
+        repair_end_time,     # L
+        repair_duration,     # M
+        executor_id          # N
+  ])
 
     if operation == "remove":
         await notify_technadzor_for_check(context, car)
