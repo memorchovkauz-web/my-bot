@@ -716,6 +716,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
+
+    if mode in ["send_km_photo", "edit_photo"]:
+        await update.message.reply_text(
+            "❌ Сиздан фақат одометр ёки моточас расмини юборишингизни сўрайман!",
+            reply_markup=back_keyboard()
+        )
+        return
     
     if mode in ["send_video", "edit_video"]:
         await update.message.reply_text(
@@ -1286,6 +1293,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     
     mode = context.user_data.get("mode")
+
+    if mode in ["write_note_add", "write_note_remove", "edit_note", "reject_reason"]:
+        await update.message.reply_text(
+            "❌ Сиздан фақат изоҳни матн шаклида ёзишингизни сўрайман!",
+            reply_markup=back_keyboard()
+        )
+        return
+    
+    if mode in ["write_km", "edit_km"]:
+        await update.message.reply_text(
+            "❌ Сиздан фақат 1–8 хонали КМ/моточас рақамини киритишингизни сўрайман!",
+            reply_markup=back_keyboard()
+        )
+        return
    
     if mode in ["send_video", "edit_video"]:
         await update.message.reply_text(
@@ -1330,6 +1351,27 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     mode = context.user_data.get("mode")
+
+    if mode in ["write_note_add", "write_note_remove", "edit_note", "reject_reason"]:
+        await update.message.reply_text(
+            "❌ Сиздан фақат изоҳни матн шаклида ёзишингизни сўрайман!",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode in ["send_km_photo", "edit_photo"]:
+        await update.message.reply_text(
+            "❌ Сиздан фақат одометр ёки моточас расмини юборишингизни сўрайман!",
+            reply_markup=back_keyboard()
+        )
+        return
+    
+    if mode in ["write_km", "edit_km"]:
+        await update.message.reply_text(
+            "❌ Сиздан фақат 1–8 хонали КМ/моточас рақамини киритишингизни сўрайман!",
+            reply_markup=back_keyboard()
+        )
+        return
 
     if update.message.video_note:
         video_id = update.message.video_note.file_id
