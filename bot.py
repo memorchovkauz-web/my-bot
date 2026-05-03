@@ -1336,12 +1336,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "final_check"
 
         await update.message.reply_text(
-            "✅ Расм янгиланди.\n\n🔴 <b>Маълумотни тасдиқлайсизми?</b>",
-            reply_markup=final_confirm_keyboard(),
-            parse_mode="HTML"
+            f"Текширинг:\n\n"
+            f"🚛 Техника: {context.user_data.get('car')}\n"
+            f"🔧 Ремонт тури: {context.user_data.get('repair_type') or 'Ремонтдан чиқарилди'}\n"
+            f"⏱ КМ/Моточас: {context.user_data.get('km')}\n"
+            f"📝 Изоҳ: {context.user_data.get('note')}\n"
+            f"🎥 Видео: сақланди ✅\n\n"
+            f"Маълумот тўғрими?",
+            reply_markup=final_confirm_keyboard()
         )
         return
-
     if mode != "send_km_photo":
         await update.message.reply_text(
             "1❌ Бу босқичда фақат изоҳ ёзиш талаб қилинади.",
@@ -1402,9 +1406,14 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "final_check"
 
         await update.message.reply_text(
-            "✅ Видео янгиланди.\n\n🔴 <b>Маълумотни тасдиқлайсизми?</b>",
-            reply_markup=final_confirm_keyboard(),
-            parse_mode="HTML"
+            f"Текширинг:\n\n"
+            f"🚛 Техника: {context.user_data.get('car')}\n"
+            f"🔧 Ремонт тури: {context.user_data.get('repair_type') or 'Ремонтдан чиқарилди'}\n"
+            f"⏱ КМ/Моточас: {context.user_data.get('km')}\n"
+            f"📝 Изоҳ: {context.user_data.get('note')}\n"
+            f"🎥 Видео: сақланди ✅\n\n"
+            f"Маълумот тўғрими?",
+            reply_markup=final_confirm_keyboard()
         )
         return
 
