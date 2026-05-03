@@ -420,6 +420,15 @@ async def safe_send_video(bot, chat_id, file_id):
         except Exception:
             pass
 
+async def safe_send_photo(bot, chat_id, file_id):
+    if not file_id:
+        return
+
+    try:
+        await bot.send_photo(chat_id=chat_id, photo=file_id)
+    except Exception:
+        pass
+
 
 async def send_last_repairs(query, car, repair_type):
     rows = remont_ws.get_all_values()[1:]
@@ -573,36 +582,43 @@ async def notify_technadzor_for_check(context, car):
     if not chiqqan:
         return
 
-    text = f"🚛 Техника: {car}\n🚜 Тури: {get_car_type(car)}\n\n"
-
-    if kirgan_list:
-        text += "🔴 РЕМОНТГА КИРГАНЛАР:\n\n"
-
-        for kirgan in kirgan_list:
-            text += (
-                f"📅 {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
-                f"⏱ {kirgan[3] if len(kirgan) > 3 else ''}\n"
-                f"🔧 {kirgan[4] if len(kirgan) > 4 else ''}\n"
-                f"📝 {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n"
-                f"👤 Киритган: {kirgan[9] if len(kirgan) > 9 else ''}\n\n"
-            )
-
-    text += (
-        "🟡 РЕМОНТДАН ЧИҚҚАН\n"
-        f"📅 Сана ва вақт: {chiqqan[11] if len(chiqqan) > 11 else chiqqan[1]}\n"
-        f"📝 Изоҳ: {clean_note(chiqqan[6] if len(chiqqan) > 6 else '')}\n"
-        f"⏳ Кетган вақт: {chiqqan[12] if len(chiqqan) > 12 else ''}\n"
-        f"👤 Чиқарган: {chiqqan[9] if len(chiqqan) > 9 else ''}"
-    )
-
     for user_id in get_user_ids_by_role("technadzor"):
         try:
-            await context.bot.send_message(chat_id=user_id, text="🔔 Янги техника текширувга келди:")
-            await context.bot.send_message(chat_id=user_id, text=text)
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"🔔 Янги техника текширувга келди:\n\n🚛 Техника: {car}\n🚜 Тури: {get_car_type(car)}"
+            )
 
-            for kirgan in kirgan_list:
-                if len(kirgan) > 7 and kirgan[7]:
-                    await safe_send_video(context.bot, user_id, kirgan[7])
+            if kirgan_list:
+                for kirgan in kirgan_list:
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=(
+                            "🔴 РЕМОНТГА КИРГАН\n"
+                            f"📅 Сана ва вақт: {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
+                            f"⏱ КМ/Моточас: {kirgan[3] if len(kirgan) > 3 else ''}\n"
+                            f"🔧 Ремонт тури: {kirgan[4] if len(kirgan) > 4 else ''}\n"
+                            f"📝 Изоҳ: {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n"
+                            f"👤 Киритган: {kirgan[9] if len(kirgan) > 9 else ''}"
+                        )
+                    )
+
+                    if len(kirgan) > 8 and kirgan[8]:
+                        await safe_send_photo(context.bot, user_id, kirgan[8])
+
+                    if len(kirgan) > 7 and kirgan[7]:
+                        await safe_send_video(context.bot, user_id, kirgan[7])
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "🟡 РЕМОНТДАН ЧИҚҚАН\n"
+                    f"📅 Сана ва вақт: {chiqqan[11] if len(chiqqan) > 11 else chiqqan[1]}\n"
+                    f"📝 Изоҳ: {clean_note(chiqqan[6] if len(chiqqan) > 6 else '')}\n"
+                    f"⏳ Кетган вақт: {chiqqan[12] if len(chiqqan) > 12 else ''}\n"
+                    f"👤 Чиқарган: {chiqqan[9] if len(chiqqan) > 9 else ''}"
+                )
+            )
 
             if len(chiqqan) > 7 and chiqqan[7]:
                 await safe_send_video(context.bot, user_id, chiqqan[7])
@@ -612,6 +628,7 @@ async def notify_technadzor_for_check(context, car):
                 text="Текширув натижасини танланг:",
                 reply_markup=confirm_action_keyboard(car)
             )
+
         except Exception:
             pass
 
