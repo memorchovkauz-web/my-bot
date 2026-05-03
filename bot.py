@@ -1427,14 +1427,30 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["video_id"] = video_id
     context.user_data["mode"] = "final_check"
 
-    await update.message.reply_text(
+    text = (
         f"Текширинг:\n\n"
         f"🚛 Техника: {context.user_data.get('car')}\n"
         f"🔧 Ремонт тури: {context.user_data.get('repair_type') or 'Ремонтдан чиқарилди'}\n"
-        f"⏱ КМ/Моточас: {context.user_data.get('km')}\n"
+    )
+
+    if context.user_data.get("operation") == "add":
+        text += f"⏱ КМ/Моточас: {context.user_data.get('km')}\n"
+
+    if context.user_data.get("operation") == "remove":
+        start = get_last_open_repair_start_time(context.user_data.get("car"))
+        end = now_text()
+        duration = calculate_duration(start, end)
+
+        text += f"⏳ Ремонт вақти: {duration}\n"
+
+    text += (
         f"📝 Изоҳ: {context.user_data.get('note')}\n"
         f"🎥 Видео: сақланди ✅\n\n"
-        f"Маълумот тўғрими?",
+        f"Маълумот тўғрими?"
+    )
+
+    await update.message.reply_text(
+        text,
         reply_markup=final_confirm_keyboard()
     )
 
