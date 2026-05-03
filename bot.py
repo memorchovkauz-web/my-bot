@@ -1292,7 +1292,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode != "send_km_photo":
         await update.message.reply_text(
-            "❌ Бу босқичда фақат расм қабул қилинади.",
+            "❌ Бу босқичда фақат изоҳ ёзиш талаб қилинади.",
             reply_markup=back_keyboard()
         )
         return
