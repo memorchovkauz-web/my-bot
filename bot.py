@@ -1226,32 +1226,34 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ Ремонтдан чиқариш маълумоти топилмади.")
             return
 
-        text = f"🚛 Техника: {car}\n🚜 Тури: {get_car_type(car)}\n\n"
+        await query.message.reply_text(
+            f"🚛 Техника: {car}\n🚜 Тури: {get_car_type(car)}"
+        )
 
         if kirgan_list:
-            text += "🔴 РЕМОНТГА КИРГАНЛАР:\n\n"
-
             for kirgan in kirgan_list:
-                text += (
-                    f"📅 {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
-                    f"⏱ {kirgan[3] if len(kirgan) > 3 else ''}\n"
-                    f"🔧 {kirgan[4] if len(kirgan) > 4 else ''}\n"
-                    f"📝 {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n\n"
+                await query.message.reply_text(
+                    "🔴 РЕМОНТГА КИРГАН\n"
+                    f"📅 Сана ва вақт: {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
+                    f"⏱ КМ/Моточас: {kirgan[3] if len(kirgan) > 3 else ''}\n"
+                    f"🔧 Ремонт тури: {kirgan[4] if len(kirgan) > 4 else ''}\n"
+                    f"📝 Изоҳ: {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n"
+                    f"👤 Киритган: {kirgan[9] if len(kirgan) > 9 else ''}"
                 )
 
-        text += (
+                if len(kirgan) > 8 and kirgan[8]:
+                    await safe_send_photo(query.message.get_bot(), query.message.chat_id, kirgan[8])
+
+                if len(kirgan) > 7 and kirgan[7]:
+                    await safe_send_video(query.message.get_bot(), query.message.chat_id, kirgan[7])
+
+        await query.message.reply_text(
             "🟡 РЕМОНТДАН ЧИҚҚАН\n"
             f"📅 Сана ва вақт: {chiqqan[11] if len(chiqqan) > 11 else chiqqan[1]}\n"
             f"📝 Изоҳ: {clean_note(chiqqan[6] if len(chiqqan) > 6 else '')}\n"
             f"⏳ Кетган вақт: {chiqqan[12] if len(chiqqan) > 12 else ''}\n"
             f"👤 Чиқарган: {chiqqan[9] if len(chiqqan) > 9 else ''}"
         )
-
-        await query.message.reply_text(text)
-
-        for kirgan in kirgan_list:
-            if len(kirgan) > 7 and kirgan[7]:
-                await safe_send_video(query.message.get_bot(), query.message.chat_id, kirgan[7])
 
         if len(chiqqan) > 7 and chiqqan[7]:
             await safe_send_video(query.message.get_bot(), query.message.chat_id, chiqqan[7])
