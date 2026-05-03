@@ -30,8 +30,8 @@ TOKEN = os.getenv("BOT_TOKEN")
 USERS = {
     492894595: {"role": "director", "name": "Jahongir Ganiyev"},
     1950294513: {"role": "mechanic", "name": "Механик исми"},
-    6921150374: {"role": "mechanic", "name": "АБС"},
-    492894594: {"role": "technadzor", "name": "Текширувчи исми"},
+    1026372827: {"role": "mechanic", "name": "Пармонов Гиёс"},
+    492894594: {"role": "technadzor", "name": "Jahongir Ganiyev"},
     444444444: {"role": "slesar", "name": "Слесарь исми"},
 }
 
