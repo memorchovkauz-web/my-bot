@@ -1,12 +1,29 @@
-import gspread
-from google.oauth2.service_account import Credentials
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-
 import os
 import json
+import threading
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import gspread
+from google.oauth2.service_account import Credentials
+
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes,
+)
+
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -23,7 +40,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-from google.oauth2.service_account import Credentials
 
 creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
@@ -61,6 +77,14 @@ def now_text():
     return datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def is_valid_km(value):
+    return value.isdigit() and 1 <= len(value) <= 8
+
+
+def is_valid_note(value):
+    return bool(value and value.strip()) and len(value.strip()) >= 2
+
+
 def calculate_duration(start_time, end_time):
     try:
         start = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
@@ -73,7 +97,7 @@ def calculate_duration(start_time, end_time):
 
 
 def get_period_dates(period):
-    now = datetime.now()
+    now = datetime.now(ZoneInfo("Asia/Tashkent"))
 
     if period == "10":
         return now - timedelta(days=10), now
@@ -191,8 +215,9 @@ def edit_keyboard():
 def edit_keyboard_remove():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 Изоҳ", callback_data="edit|note")],
-        [InlineKeyboardButton("🎥 Видео", callback_data="edit|video")]
+        [InlineKeyboardButton("🎥 Видео", callback_data="edit|video")],
     ])
+
 
 def get_all_cars():
     return mashina_ws.get_all_values()[1:]
@@ -282,9 +307,7 @@ def cars_for_check_by_firm_group():
 
             if firm_name.lower() == firm.lower() and holat.lower() == "текширувда":
                 if not firm_has_cars:
-                    keyboard.append([
-                        InlineKeyboardButton(f"🏢 {firm}", callback_data="none")
-                    ])
+                    keyboard.append([InlineKeyboardButton(f"🏢 {firm}", callback_data="none")])
                     firm_has_cars = True
 
                 keyboard.append([
@@ -384,10 +407,24 @@ def get_last_repair_pair(car):
     kirgan_list.reverse()
     return kirgan_list, chiqqan
 
+
+async def safe_send_video(bot, chat_id, file_id):
+    if not file_id:
+        return
+
+    try:
+        await bot.send_video_note(chat_id=chat_id, video_note=file_id)
+    except Exception:
+        try:
+            await bot.send_video(chat_id=chat_id, video=file_id)
+        except Exception:
+            pass
+
+
 async def send_last_repairs(query, car, repair_type):
     rows = remont_ws.get_all_values()[1:]
     result = []
-    one_year_ago = datetime.now() - timedelta(days=365)
+    one_year_ago = datetime.now(ZoneInfo("Asia/Tashkent")) - timedelta(days=365)
 
     for row in rows:
         if len(row) < 14:
@@ -406,7 +443,7 @@ async def send_last_repairs(query, car, repair_type):
         except Exception:
             continue
 
-        if sana < one_year_ago:
+        if sana < one_year_ago.replace(tzinfo=None):
             continue
 
         result.append({
@@ -432,7 +469,7 @@ async def send_last_repairs(query, car, repair_type):
         )
 
         if item["video_id"]:
-            await query.message.reply_video_note(item["video_id"])
+            await safe_send_video(query.message.get_bot(), query.message.chat_id, item["video_id"])
 
 
 async def send_history_by_date(message, car, start_date, end_date):
@@ -454,7 +491,7 @@ async def send_history_by_date(message, car, start_date, end_date):
         except Exception:
             continue
 
-        if not (start_date <= sana <= end_date):
+        if not (start_date.replace(tzinfo=None) <= sana <= end_date.replace(tzinfo=None)):
             continue
 
         km = row[3] if len(row) > 3 else ""
@@ -479,7 +516,6 @@ async def send_history_by_date(message, car, start_date, end_date):
                 f"🎥 Видео: сақланган ✅\n"
                 f"👤 Ремонтга киритган шахс: {person}"
             )
-
         elif status == "Текширувда":
             block = (
                 f"🚛 Техника: {car}\n"
@@ -491,7 +527,6 @@ async def send_history_by_date(message, car, start_date, end_date):
                 f"⏳ Ремонтга кетган вақт: {duration}\n"
                 f"👤 Ремонтдан чиқарган шахс: {person}"
             )
-
         elif status == "Соз" and "тасдиқ" in repair_type.lower():
             block = (
                 f"🚛 Техника: {car}\n"
@@ -500,7 +535,6 @@ async def send_history_by_date(message, car, start_date, end_date):
                 f"📅 Сана ва вақт: {sana_text}\n"
                 f"👤 Технодзор: {person}"
             )
-
         else:
             block = (
                 f"🚛 Техника: {car}\n"
@@ -517,8 +551,7 @@ async def send_history_by_date(message, car, start_date, end_date):
 
     if not text_result:
         await message.reply_text(
-            "Бу вақт оралиғида ремонт историяси топилмади.\n\n"
-            "Бошқа даврни танланг:",
+            "Бу вақт оралиғида ремонт историяси топилмади.\n\nБошқа даврни танланг:",
             reply_markup=history_period_keyboard()
         )
         return
@@ -531,7 +564,7 @@ async def send_history_by_date(message, car, start_date, end_date):
         await message.reply_text(block)
 
         if video_id:
-            await message.reply_video_note(video_id)
+            await safe_send_video(message.get_bot(), message.chat_id, video_id)
 
 
 async def notify_technadzor_for_check(context, car):
@@ -542,13 +575,17 @@ async def notify_technadzor_for_check(context, car):
 
     text = f"🚛 Техника: {car}\n🚜 Тури: {get_car_type(car)}\n\n"
 
-    for kirgan in kirgan_list:
-         text += (
-            f"📅 {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
-            f"⏱ {kirgan[3] if len(kirgan) > 3 else ''}\n"
-            f"🔧 {kirgan[4] if len(kirgan) > 4 else ''}\n"
-            f"📝 {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n\n"
-        )
+    if kirgan_list:
+        text += "🔴 РЕМОНТГА КИРГАНЛАР:\n\n"
+
+        for kirgan in kirgan_list:
+            text += (
+                f"📅 {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
+                f"⏱ {kirgan[3] if len(kirgan) > 3 else ''}\n"
+                f"🔧 {kirgan[4] if len(kirgan) > 4 else ''}\n"
+                f"📝 {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n"
+                f"👤 Киритган: {kirgan[9] if len(kirgan) > 9 else ''}\n\n"
+            )
 
     text += (
         "🟡 РЕМОНТДАН ЧИҚҚАН\n"
@@ -560,41 +597,27 @@ async def notify_technadzor_for_check(context, car):
 
     for user_id in get_user_ids_by_role("technadzor"):
         try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="🔔 Янги техника текширувга келди:"
-            )
+            await context.bot.send_message(chat_id=user_id, text="🔔 Янги техника текширувга келди:")
+            await context.bot.send_message(chat_id=user_id, text=text)
 
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=text
-            )
-
-            if kirgan and len(kirgan) > 7 and kirgan[7]:
-                await context.bot.send_video_note(
-                    chat_id=user_id,
-                    video_note=kirgan[7]
-                )
+            for kirgan in kirgan_list:
+                if len(kirgan) > 7 and kirgan[7]:
+                    await safe_send_video(context.bot, user_id, kirgan[7])
 
             if len(chiqqan) > 7 and chiqqan[7]:
-                await context.bot.send_video_note(
-                    chat_id=user_id,
-                    video_note=chiqqan[7]
-                )
+                await safe_send_video(context.bot, user_id, chiqqan[7])
 
             await context.bot.send_message(
                 chat_id=user_id,
                 text="Текширув натижасини танланг:",
                 reply_markup=confirm_action_keyboard(car)
             )
-
         except Exception:
             pass
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-
     role = get_role(update)
 
     if role not in ["director", "mechanic", "technadzor", "slesar"]:
@@ -602,37 +625,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if role == "technadzor":
-        await update.message.reply_text(
-            "🧑‍🔍 Текширувчи менюси:",
-            reply_markup=technadzor_keyboard()
-        )
+        await update.message.reply_text("🧑‍🔍 Текширувчи менюси:", reply_markup=technadzor_keyboard())
         return
 
     if role == "mechanic":
-        await update.message.reply_text(
-            "🔧 Механик менюси\n\nАввал фирмани танланг:",
-            reply_markup=firm_keyboard()
-        )
+        await update.message.reply_text("🔧 Механик менюси\n\nАввал фирмани танланг:", reply_markup=firm_keyboard())
         return
 
     if role == "slesar":
-        await update.message.reply_text(
-            "🛠 Слесарь менюси\n\nАввал фирмани танланг:",
-            reply_markup=firm_keyboard()
-        )
+        await update.message.reply_text("🛠 Слесарь менюси\n\nАввал фирмани танланг:", reply_markup=firm_keyboard())
         return
 
     if role == "director":
-        await update.message.reply_text(
-            "👨‍💼 Директор менюси\n\nАввал фирмани танланг:",
-            reply_markup=firm_keyboard()
-        )
+        await update.message.reply_text("👨‍💼 Директор менюси\n\nАввал фирмани танланг:", reply_markup=firm_keyboard())
         return
-
-    await update.message.reply_text(
-        "Аввал фирмани танланг:",
-        reply_markup=firm_keyboard()
-    )
 
 
 async def save_final_data(update_or_query, context, message_obj):
@@ -655,7 +661,6 @@ async def save_final_data(update_or_query, context, message_obj):
         repair_start_time = current_time
         repair_end_time = ""
         repair_duration = ""
-
     else:
         status = "Текширувда"
         amal = "Ремонтдан чиқарилди"
@@ -687,16 +692,8 @@ async def save_final_data(update_or_query, context, message_obj):
     if operation == "remove":
         await notify_technadzor_for_check(context, car)
 
-    try:
-        if hasattr(update_or_query, "callback_query") and update_or_query.callback_query:
-            await update_or_query.callback_query.message.edit_reply_markup(reply_markup=None)
-    except:
-        pass
-    
     await message_obj.reply_text(
-        f"✅ Маълумот сақланди.\n\n"
-        f"🚛 Техника: {car}\n"
-        f"📌 Ҳолат: {status}",
+        f"✅ Маълумот сақланди.\n\n🚛 Техника: {car}\n📌 Ҳолат: {status}",
         reply_markup=technadzor_keyboard() if role == "technadzor" else action_keyboard()
     )
 
@@ -719,6 +716,87 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
+
+    if text == "⬅️ Орқага":
+        if mode == "choose_repair_type":
+            context.user_data["mode"] = None
+            await update.message.reply_text("Амални танланг:", reply_markup=action_keyboard())
+            return
+
+        if mode == "choose_car":
+            context.user_data["mode"] = "choose_repair_type"
+            await update.message.reply_text("Ремонт турини танланг:", reply_markup=repair_type_keyboard())
+            return
+
+        if mode == "write_km":
+            context.user_data["mode"] = "choose_car"
+            await update.message.reply_text("Техникани танланг:", reply_markup=car_buttons_by_firm(context.user_data.get("firm")))
+            return
+
+        if mode == "send_km_photo":
+            context.user_data["mode"] = "write_km"
+            await update.message.reply_text(
+                "🔴 <b>КМ/моточасни қайта киритинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if mode == "write_note_add":
+            context.user_data["mode"] = "send_km_photo"
+            await update.message.reply_text(
+                "🔴 <b>Одометр ёки моточас расмини қайта юборинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if mode == "write_note_remove":
+            context.user_data["mode"] = "remove_car"
+            await update.message.reply_text(
+                "Носоз техникани танланг:",
+                reply_markup=car_buttons_by_firm_and_status(context.user_data.get("firm"), "Носоз")
+            )
+            return
+
+        if mode == "send_video":
+            if context.user_data.get("operation") == "remove":
+                context.user_data["mode"] = "write_note_remove"
+            else:
+                context.user_data["mode"] = "write_note_add"
+
+            await update.message.reply_text(
+                "🔴 <b>Изоҳни қайта ёзинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if mode in ["edit_km", "edit_photo", "edit_note", "edit_video", "final_check"]:
+            context.user_data["mode"] = "final_check"
+            await update.message.reply_text(
+                "🔴 <b>Маълумотни тасдиқлайсизми?</b>",
+                parse_mode="HTML",
+                reply_markup=final_confirm_keyboard()
+            )
+            return
+
+        context.user_data.clear()
+
+        if role == "technadzor":
+            await update.message.reply_text("🧑‍🔍 Текширувчи менюси:", reply_markup=technadzor_keyboard())
+            return
+
+        if role == "mechanic":
+            await update.message.reply_text("🔧 Механик менюси\n\nАввал фирмани танланг:", reply_markup=firm_keyboard())
+            return
+
+        if role == "slesar":
+            await update.message.reply_text("🛠 Слесарь менюси\n\nАввал фирмани танланг:", reply_markup=firm_keyboard())
+            return
+
+        await update.message.reply_text("👨‍💼 Директор менюси\n\nАввал фирмани танланг:", reply_markup=firm_keyboard())
+        return
 
     if mode == "reject_reason":
         car = context.user_data.get("reject_car")
@@ -747,28 +825,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update.effective_user.id
         ])
 
-        rows = remont_ws.get_all_values()[1:]
-        notify_id = None
-
-        for row in reversed(rows):
-            if len(row) > 13 and row[2].strip().lower() == car.lower():
-                if row[5].strip() == "Текширувда":
-                    notify_id = row[13]
-                    break
-
-        if notify_id:
-            try:
-                await context.bot.send_message(
-                    chat_id=int(notify_id),
-                    text=(
-                        f"❌ {car} текширувдан ўтмади.\n"
-                        f"Сабаб: {reason}\n"
-                        f"Текширувчи: {inspector}"
-                    )
-                )
-            except Exception:
-                pass
-
         await update.message.reply_text(
             f"❌ {car} Носоз ҳолатига қайтарилди.",
             reply_markup=cars_for_check_by_firm_group()
@@ -778,7 +834,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["reject_car"] = None
         return
 
+    if mode == "edit_km":
+        if not is_valid_km(text):
+            await update.message.reply_text(
+                "❌ Нотўғри.\n\n🔴 <b>Фақат 1–8 хонали рақам киритинг.</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["km"] = text
+        context.user_data["mode"] = "final_check"
+
+        await update.message.reply_text(
+            "✅ КМ/моточас янгиланди.\n\n🔴 <b>Маълумотни тасдиқлайсизми?</b>",
+            reply_markup=final_confirm_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
     if mode == "edit_note":
+        if not is_valid_note(text):
+            await update.message.reply_text(
+                "❌ Изоҳ жуда қисқа.\n\n🔴 <b>Изоҳни ёзинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
         context.user_data["note"] = text
         context.user_data["mode"] = "final_check"
 
@@ -789,94 +872,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "⬅️ Орқага":
-        context.user_data.clear()
-
-        if role == "technadzor":
-            await update.message.reply_text(
-                "🧑‍🔍 Текширувчи менюси:",
-                reply_markup=technadzor_keyboard()
-            )
-            return
-
-        if role == "mechanic":
-            await update.message.reply_text(
-                "🔧 Механик менюси\n\nАввал фирмани танланг:",
-                reply_markup=firm_keyboard()
-            )
-            return
-
-        if role == "slesar":
-            await update.message.reply_text(
-                "🛠 Слесарь менюси\n\nАввал фирмани танланг:",
-                reply_markup=firm_keyboard()
-            )
-            return
-
-        if role == "director":
-            await update.message.reply_text(
-                "👨‍💼 Директор менюси\n\nАввал фирмани танланг:",
-                reply_markup=firm_keyboard()
-            )
-            return
-
-        if mode == "choose_repair_type":
-            context.user_data["mode"] = None
-            await update.message.reply_text(
-                "Амални танланг:",
-                reply_markup=action_keyboard()
-            )
-            return
-
-        context.user_data.clear()
-        await update.message.reply_text(
-            "Фирмани танланг:",
-            reply_markup=firm_keyboard()
-        )
-        return
-
     if role == "technadzor":
         if text == "🔧 Ремонтга қўшиш":
             context.user_data.clear()
             context.user_data["mode"] = "select_firm_for_add"
-
-            await update.message.reply_text(
-                "🔴 <b>Фирмани танланг:</b>",
-                parse_mode="HTML"
-            )
+            await update.message.reply_text("🔴 <b>Фирмани танланг:</b>", parse_mode="HTML", reply_markup=firm_keyboard())
             return
 
         if text == "☑️ Ремонтдан чиқишини тасдиқлаш":
             context.user_data["mode"] = "confirm_exit"
-
-            await update.message.reply_text(
-                "Текширувда турган техникалар:",
-                reply_markup=cars_for_check_by_firm_group()
-            )
+            await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
             return
 
         if text == "📚 История":
             context.user_data["mode"] = "history_select_firm"
-
-            await update.message.reply_text(
-                "Қайси фирма техникасини кўрмоқчисиз?",
-                reply_markup=firm_keyboard()
-            )
+            await update.message.reply_text("Қайси фирма техникасини кўрмоқчисиз?", reply_markup=firm_keyboard())
             return
 
     if mode == "history_select_firm" and text in FIRM_NAMES:
         context.user_data["firm"] = text
         context.user_data["mode"] = "history_select_car"
 
-        await update.message.reply_text(
-            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
-            reply_markup=back_keyboard()
-        )
-
-        await update.message.reply_text(
-            "Техникани танланг:",
-            reply_markup=car_buttons_by_firm(text)
-        )
+        await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=back_keyboard())
+        await update.message.reply_text("Техникани танланг:", reply_markup=car_buttons_by_firm(text))
         return
 
     if text in FIRM_NAMES:
@@ -885,10 +903,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["mode"] = "choose_repair_type"
             context.user_data["operation"] = "add"
 
-            await update.message.reply_text(
-                "Ремонт турини танланг:",
-                reply_markup=repair_type_keyboard()
-            )
+            await update.message.reply_text("Ремонт турини танланг:", reply_markup=repair_type_keyboard())
             return
 
         context.user_data.clear()
@@ -910,11 +925,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["repair_type"] = None
         context.user_data["km"] = None
         context.user_data["km_photo_id"] = None
+        context.user_data["video_id"] = None
 
-        await update.message.reply_text(
-            "Ремонт турини танланг:",
-            reply_markup=repair_type_keyboard()
-        )
+        await update.message.reply_text("Ремонт турини танланг:", reply_markup=repair_type_keyboard())
         return
 
     if text == "✅ Ремонтдан чиқариш":
@@ -946,16 +959,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["repair_type"] = text
         context.user_data["mode"] = "choose_car"
 
-        await update.message.reply_text(
-            "Техникани танланг:",
-            reply_markup=car_buttons_by_firm(context.user_data["firm"])
-        )
+        await update.message.reply_text("Техникани танланг:", reply_markup=car_buttons_by_firm(context.user_data["firm"]))
         return
 
     if mode == "write_km":
-        if not text.isdigit() or not (1 <= len(text) <= 8):
+        if not is_valid_km(text):
             await update.message.reply_text(
-                "❌ Фақат 1–8 хонали рақам киритинг!",
+                "❌ Нотўғри.\n\n🔴 <b>Фақат 1–8 хонали рақам киритинг.</b>",
+                parse_mode="HTML",
                 reply_markup=back_keyboard()
             )
             return
@@ -964,17 +975,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "send_km_photo"
 
         await update.message.reply_text(
-            "📷 ОДОМЕТР РАСМИНИ ЮБОРИНГ",
+            "✅ КМ/моточас сақланди.\n\n🔴 <b>Энди одометр ёки моточас расмини юборинг.</b>",
+            parse_mode="HTML",
             reply_markup=back_keyboard()
         )
         return
 
     if mode in ["write_note_add", "write_note_remove"]:
+        if not is_valid_note(text):
+            await update.message.reply_text(
+                "❌ Изоҳ жуда қисқа.\n\n🔴 <b>Изоҳни ёзинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
         context.user_data["note"] = text
         context.user_data["mode"] = "send_video"
 
         await update.message.reply_text(
-            "✅ Изоҳ сақланди.\n\nЭнди думалоқ видео отчет юборинг."
+            "✅ Изоҳ сақланди.\n\n🔴 <b>Энди думалоқ видео ёки оддий видео файл юборинг.</b>",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "send_km_photo":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат расм қабул қилинади.\n\n🔴 <b>Одометр ёки моточас расмини юборинг.</b>",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "send_video":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат думалоқ видео ёки оддий видео файл қабул қилинади.",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
         )
         return
 
@@ -999,19 +1037,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             await query.edit_message_reply_markup(reply_markup=None)
-        except:
+        except Exception:
             pass
 
         await query.answer("Сақланди ✅")
         return
 
     if query.data == "final_edit":
-        await query.edit_message_reply_markup(reply_markup=None)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
 
-        if context.user_data.get("operation") == "remove":
-            keyboard = edit_keyboard_remove()
-        else:
-            keyboard = edit_keyboard()
+        keyboard = edit_keyboard_remove() if context.user_data.get("operation") == "remove" else edit_keyboard()
 
         await query.message.reply_text(
             "🔴 <b>Қайси маълумотни таҳрирлайсиз?</b>",
@@ -1019,62 +1057,95 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         return
- 
-        if query.data.startswith("car|"):
-            car = query.data.split("|", 1)[1]
-            mode = context.user_data.get("mode")
 
-            if mode == "choose_car":
-                context.user_data["car"] = car
-                repair_type = context.user_data.get("repair_type")
+    if query.data.startswith("car|"):
+        car = query.data.split("|", 1)[1]
+        mode = context.user_data.get("mode")
 
-                await send_last_repairs(query, car, repair_type)
+        if mode == "history_select_car":
+            context.user_data["history_car"] = car
+            context.user_data["mode"] = "history_period"
 
-                context.user_data["mode"] = "write_km"
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n\nҚайси давр бўйича история керак?",
+                reply_markup=history_period_keyboard()
+            )
+            return
 
-                await query.message.reply_text(
-                    f"🚛 Техника: {car}\n"
-                    f"🏢 Фирма: {context.user_data.get('firm')}\n"
-                    f"🔧 Ремонт тури: {repair_type}\n\n"
-                    "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>",
-                    parse_mode="HTML",
-                    reply_markup=back_keyboard()
-                )
-                return
+        if mode == "choose_car":
+            context.user_data["car"] = car
+            repair_type = context.user_data.get("repair_type")
 
-            if mode == "remove_car":
-                context.user_data["car"] = car
-                context.user_data["mode"] = "write_note_remove"
+            await send_last_repairs(query, car, repair_type)
 
-                await query.message.reply_text(
-                    f"🚛 Техника: {car}\n"
-                    f"🏢 Фирма: {context.user_data.get('firm')}\n\n"
-                    "🔴 <b>Қилинган иш бўйича изоҳ ёзинг:</b>",
-                    parse_mode="HTML",
-                    reply_markup=back_keyboard()
-                )
-                return
+            context.user_data["mode"] = "write_km"
+
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\n"
+                f"🔧 Ремонт тури: {repair_type}\n\n"
+                "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>\n\n"
+                "Мисол: 125000",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if mode == "remove_car":
+            context.user_data["car"] = car
+            context.user_data["mode"] = "write_note_remove"
+
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\n\n"
+                "🔴 <b>Қилинган иш бўйича изоҳ ёзинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
     if query.data.startswith("edit|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
         field = query.data.split("|", 1)[1]
 
         if field == "km":
             context.user_data["mode"] = "edit_km"
-            await query.message.reply_text("Янги КМ/моточасни ёзинг:")
+            await query.message.reply_text(
+                "🔴 <b>Янги КМ/моточасни рақам билан киритинг:</b>\n\nМисол: 125000",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
             return
 
         if field == "photo":
             context.user_data["mode"] = "edit_photo"
-            await query.message.reply_text("Янги расмни юборинг:")
+            await query.message.reply_text(
+                "🔴 <b>Янги расмни юборинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
             return
 
         if field == "note":
             context.user_data["mode"] = "edit_note"
-            await query.message.reply_text("Янги изоҳни ёзинг:")
+            await query.message.reply_text(
+                "🔴 <b>Янги изоҳни ёзинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
             return
 
         if field == "video":
             context.user_data["mode"] = "edit_video"
-            await query.message.reply_text("Янги думалоқ видеони юборинг:")
+            await query.message.reply_text(
+                "🔴 <b>Янги думалоқ видео ёки оддий видео файл юборинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
             return
 
     if query.data.startswith("period|"):
@@ -1107,15 +1178,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"🚛 Техника: {car}\n🚜 Тури: {get_car_type(car)}\n\n"
 
         if kirgan_list:
-           text += "🔴 РЕМОНТГА КИРГАНЛАР:\n\n"
+            text += "🔴 РЕМОНТГА КИРГАНЛАР:\n\n"
 
-           for kirgan in kirgan_list:
-               text += (
-            f"📅 {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
-            f"⏱ {kirgan[3] if len(kirgan) > 3 else ''}\n"
-            f"🔧 {kirgan[4] if len(kirgan) > 4 else ''}\n"
-            f"📝 {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n\n"
-        )
+            for kirgan in kirgan_list:
+                text += (
+                    f"📅 {kirgan[10] if len(kirgan) > 10 else kirgan[1]}\n"
+                    f"⏱ {kirgan[3] if len(kirgan) > 3 else ''}\n"
+                    f"🔧 {kirgan[4] if len(kirgan) > 4 else ''}\n"
+                    f"📝 {clean_note(kirgan[6] if len(kirgan) > 6 else '')}\n\n"
+                )
 
         text += (
             "🟡 РЕМОНТДАН ЧИҚҚАН\n"
@@ -1127,11 +1198,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(text)
 
-        if kirgan and len(kirgan) > 7 and kirgan[7]:
-            await query.message.reply_video_note(kirgan[7])
+        for kirgan in kirgan_list:
+            if len(kirgan) > 7 and kirgan[7]:
+                await safe_send_video(query.message.get_bot(), query.message.chat_id, kirgan[7])
 
         if len(chiqqan) > 7 and chiqqan[7]:
-            await query.message.reply_video_note(chiqqan[7])
+            await safe_send_video(query.message.get_bot(), query.message.chat_id, chiqqan[7])
 
         await query.message.reply_text(
             "Текширув натижасини танланг:",
@@ -1140,6 +1212,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data.startswith("approve|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
         car = query.data.split("|", 1)[1]
         confirmed_by = get_user_name(update)
         current_time = now_text()
@@ -1172,44 +1249,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data.startswith("reject|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
         car = query.data.split("|", 1)[1]
         context.user_data["reject_car"] = car
         context.user_data["mode"] = "reject_reason"
 
         await query.message.reply_text(
-            f"❌ {car} текширувдан ўтмади.\n\nСабабини ёзинг:"
-        )
-        return
-        
-     if query.data.startswith("car|"):
-         car = query.data.split("|", 1)[1]
-         mode = context.user_data.get("mode")
-
-     if mode == "choose_car":
-        context.user_data["car"] = car
-        repair_type = context.user_data.get("repair_type")
-
-        await send_last_repairs(query, car, repair_type)
-
-        context.user_data["mode"] = "write_km"
-
-        await query.message.reply_text(
-            f"🚛 Техника: {car}\n"
-            f"🏢 Фирма: {context.user_data.get('firm')}\n"
-            f"🔧 Ремонт тури: {repair_type}\n\n"
-            "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>",
-            parse_mode="HTML"
-            )
-            return
-
-    if mode == "remove_car":
-        context.user_data["car"] = car
-        context.user_data["mode"] = "write_note_remove"
-
-        await query.message.reply_text(
-            f"🚛 Техника: {car}\n"
-            f"🏢 Фирма: {context.user_data.get('firm')}\n\n"
-            "Қилинган иш бўйича изоҳ ёзинг:"
+            f"❌ {car} текширувдан ўтмади.\n\n🔴 <b>Сабабини ёзинг:</b>",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
         )
         return
 
@@ -1228,21 +1280,26 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "final_check"
 
         await update.message.reply_text(
-            "✅ Расм янгиланди.",
-            reply_markup=final_confirm_keyboard()
+            "✅ Расм янгиланди.\n\n🔴 <b>Маълумотни тасдиқлайсизми?</b>",
+            reply_markup=final_confirm_keyboard(),
+            parse_mode="HTML"
         )
         return
 
     if mode != "send_km_photo":
-        await update.message.reply_text("Фото фақат КМ/моточас босқичида қабул қилинади.")
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат расм қабул қилинади.",
+            reply_markup=back_keyboard()
+        )
         return
 
     context.user_data["km_photo_id"] = update.message.photo[-1].file_id
     context.user_data["mode"] = "write_note_add"
 
     await update.message.reply_text(
-        "✅ КМ/моточас расми сақланди.\n\n"
-        "Энди носозлик ёки изоҳни ёзинг:"
+        "✅ КМ/моточас расми сақланди.\n\n🔴 <b>Энди носозлик ёки изоҳни ёзинг:</b>",
+        parse_mode="HTML",
+        reply_markup=back_keyboard()
     )
 
 
@@ -1255,8 +1312,16 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mode = context.user_data.get("mode")
 
+    if update.message.video_note:
+        video_id = update.message.video_note.file_id
+    elif update.message.video:
+        video_id = update.message.video.file_id
+    else:
+        await update.message.reply_text("❌ Фақат видео юборинг.", reply_markup=back_keyboard())
+        return
+
     if mode == "edit_video":
-        context.user_data["video_id"] = update.message.video_note.file_id
+        context.user_data["video_id"] = video_id
         context.user_data["mode"] = "final_check"
 
         await update.message.reply_text(
@@ -1268,11 +1333,12 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode != "send_video":
         await update.message.reply_text(
-            "Аввал фирма → амал → техника → изоҳ/КМ босқичларини бажаринг."
+            "❌ Бу босқичда фақат думалоқ видео ёки оддий видео файл қабул қилинади.",
+            reply_markup=back_keyboard()
         )
         return
 
-    context.user_data["video_id"] = update.message.video_note.file_id
+    context.user_data["video_id"] = video_id
     context.user_data["mode"] = "final_check"
 
     await update.message.reply_text(
@@ -1287,17 +1353,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-app = ApplicationBuilder().token(TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(handle_callback))
-app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-app.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -1310,11 +1365,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-type", "text/plain")
         self.end_headers()
 
+
 def run_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), Handler)
     server.serve_forever()
 
+
 threading.Thread(target=run_server, daemon=True).start()
+
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(handle_callback))
+app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 app.run_polling()
