@@ -733,9 +733,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "⬅️ Орқага":
         if mode == "choose_repair_type":
-            context.user_data["mode"] = None
-            await update.message.reply_text("Амални танланг:", reply_markup=action_keyboard())
-            return
+            if role == "technadzor":
+                context.user_data["mode"] = "select_firm_for_add"
+                await update.message.reply_text(
+                    "🔴 <b>Фирмани танланг:</b>",
+                    parse_mode="HTML",
+                    reply_markup=firm_keyboard()
+                )
+                return
+
+         context.user_data["mode"] = None
+         await update.message.reply_text(
+             "Амални танланг:",
+             reply_markup=action_keyboard()
+         )
+         return
 
         if mode == "choose_car":
             context.user_data["mode"] = "choose_repair_type"
@@ -861,9 +873,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "final_check"
 
         await update.message.reply_text(
-            "✅ КМ/моточас янгиланди.\n\n🔴 <b>Маълумотни тасдиқлайсизми?</b>",
-            reply_markup=final_confirm_keyboard(),
-            parse_mode="HTML"
+            f"Текширинг:\n\n"
+            f"🚛 Техника: {context.user_data.get('car')}\n"
+            f"🔧 Ремонт тури: {context.user_data.get('repair_type') or 'Ремонтдан чиқарилди'}\n"
+            f"⏱ КМ/Моточас: {context.user_data.get('km')}\n"
+            f"📝 Изоҳ: {context.user_data.get('note')}\n"
+            f"🎥 Видео: сақланди ✅\n\n"
+            f"Маълумот тўғрими?",
+            reply_markup=final_confirm_keyboard()
         )
         return
 
@@ -880,9 +897,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "final_check"
 
         await update.message.reply_text(
-            "✅ Изоҳ янгиланди.\n\n🔴 <b>Маълумотни тасдиқлайсизми?</b>",
-            reply_markup=final_confirm_keyboard(),
-            parse_mode="HTML"
+            f"Текширинг:\n\n"
+            f"🚛 Техника: {context.user_data.get('car')}\n"
+            f"🔧 Ремонт тури: {context.user_data.get('repair_type') or 'Ремонтдан чиқарилди'}\n"
+            f"⏱ КМ/Моточас: {context.user_data.get('km')}\n"
+            f"📝 Изоҳ: {context.user_data.get('note')}\n"
+            f"🎥 Видео: сақланди ✅\n\n"
+            f"Маълумот тўғрими?",
+            reply_markup=final_confirm_keyboard()
         )
         return
 
