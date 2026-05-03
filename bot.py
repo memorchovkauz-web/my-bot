@@ -1014,7 +1014,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode == "send_video":
         await update.message.reply_text(
-            "❌ Бу босқичда фақат думалоқ видео ёки оддий видео файл қабул қилинади.",
+            "❌ Бу босқичда фақат расм қабул қилинади.",
             parse_mode="HTML",
             reply_markup=back_keyboard()
         )
@@ -1282,7 +1282,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
    
     if mode in ["send_video", "edit_video"]:
         await update.message.reply_text(
-            "❌ Сиздан фақат думалоқ видео хабар ёки видео файл юборишингизни сўрайман!",
+            "❌ Думалоқ видео хабар ёки видео файл юборинг!",
             reply_markup=back_keyboard()
         )
         return
@@ -1345,7 +1345,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode != "send_video":
         await update.message.reply_text(
-            "❌ Бу босқичда фақат думалоқ видео ёки оддий видео файл қабул қилинади.",
+            "❌ Думалоқ видео хабар ёки видео файл юборинг!",
             reply_markup=back_keyboard()
         )
         return
