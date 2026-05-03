@@ -631,7 +631,11 @@ async def notify_technadzor_for_check(context, car):
 
         except Exception:
             pass
-
+            
+async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"Сизнинг ID: {update.effective_user.id}"
+    )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -1498,6 +1502,7 @@ threading.Thread(target=run_server, daemon=True).start()
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("id", get_id))
 app.add_handler(CallbackQueryHandler(handle_callback))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video))
