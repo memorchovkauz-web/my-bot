@@ -716,6 +716,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
+    
+    if mode in ["send_video", "edit_video"]:
+        await update.message.reply_text(
+            "❌ Сиздан фақат думалоқ видео хабар ёки видео файл юборишингизни сўрайман!",
+            reply_markup=back_keyboard()
+        )
+        return
 
     if text == "⬅️ Орқага":
         if mode == "choose_repair_type":
@@ -969,7 +976,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode == "write_km":
         if not is_valid_km(text):
             await update.message.reply_text(
-                "2❌ Нотўғри.\n\n🔴 <b>Фақат 1–8 хонали рақам киритинг.</b>",
+                "❌ Нотўғри.\n\n🔴 <b>Фақат 1–8 хонали рақам киритинг.</b>",
                 parse_mode="HTML",
                 reply_markup=back_keyboard()
             )
@@ -1343,9 +1350,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if mode != "send_video":
+    if mode not in ["send_video", "edit_video"]:
         await update.message.reply_text(
-            "2❌ Думалоқ видео хабар ёки видео файл юборинг!",
+            "❌ Сиздан фақат думалоқ видео хабар ёки видео файл юборишингизни сўрайман!",
             reply_markup=back_keyboard()
         )
         return
