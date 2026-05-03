@@ -837,7 +837,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode == "edit_km":
         if not is_valid_km(text):
             await update.message.reply_text(
-                "❌ Нотўғри.\n\n🔴 <b>Фақат 1–8 хонали рақам киритинг.</b>",
+                "1❌ Нотўғри.\n\n🔴 <b>Фақат 1–8 хонали рақам киритинг.</b>",
                 parse_mode="HTML",
                 reply_markup=back_keyboard()
             )
@@ -969,7 +969,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode == "write_km":
         if not is_valid_km(text):
             await update.message.reply_text(
-                "❌ Нотўғри.\n\n🔴 <b>Фақат 1–8 хонали рақам киритинг.</b>",
+                "2❌ Нотўғри.\n\n🔴 <b>Фақат 1–8 хонали рақам киритинг.</b>",
                 parse_mode="HTML",
                 reply_markup=back_keyboard()
             )
@@ -1282,7 +1282,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
    
     if mode in ["send_video", "edit_video"]:
         await update.message.reply_text(
-            "❌ Думалоқ видео хабар ёки видео файл юборинг!",
+            "1❌ Думалоқ видео хабар ёки видео файл юборинг!",
             reply_markup=back_keyboard()
         )
         return
@@ -1300,7 +1300,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode != "send_km_photo":
         await update.message.reply_text(
-            "❌ Бу босқичда фақат изоҳ ёзиш талаб қилинади.",
+            "1❌ Бу босқичда фақат изоҳ ёзиш талаб қилинади.",
             reply_markup=back_keyboard()
         )
         return
@@ -1345,7 +1345,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode != "send_video":
         await update.message.reply_text(
-            "❌ Думалоқ видео хабар ёки видео файл юборинг!",
+            "2❌ Думалоқ видео хабар ёки видео файл юборинг!",
             reply_markup=back_keyboard()
         )
         return
