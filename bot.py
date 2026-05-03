@@ -1277,7 +1277,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await deny(update)
         return
 
+    
     mode = context.user_data.get("mode")
+   
+    if mode in ["send_video", "edit_video"]:
+        await update.message.reply_text(
+            "❌ Сиздан фақат думалоқ видео хабар ёки видео файл юборишингизни сўрайман!",
+            reply_markup=back_keyboard()
+        )
+        return
 
     if mode == "edit_photo":
         context.user_data["km_photo_id"] = update.message.photo[-1].file_id
