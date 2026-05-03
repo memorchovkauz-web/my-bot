@@ -742,12 +742,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-         context.user_data["mode"] = None
-         await update.message.reply_text(
-             "Амални танланг:",
-             reply_markup=action_keyboard()
-         )
-         return
 
         if mode == "choose_car":
             context.user_data["mode"] = "choose_repair_type"
