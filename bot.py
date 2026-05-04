@@ -847,6 +847,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if mode == "driver_name":
+        if not is_valid_name(text):
+            await update.message.reply_text(
+                "❌ Исм фақат ҳарфлардан иборат бўлиши керак.\n\n"
+                "🔴 <b>Мисол: Тешавой</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["driver_name"] = text
+        context.user_data["mode"] = "driver_surname"
+
+        await update.message.reply_text(
+            "🔴 <b>Фамилиянгизни киритинг</b>\n\nМисол: Алиев",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "driver_surname":
+        if not is_valid_name(text):
+            await update.message.reply_text(
+                "❌ Фамилия фақат ҳарфлардан иборат бўлиши керак.\n\n"
+                "🔴 <b>Мисол: Алиев</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["driver_surname"] = text
+        context.user_data["mode"] = "driver_phone"
+
+        await update.message.reply_text(
+            "📞 Телефон рақамингизни юборинг:",
+            reply_markup=phone_keyboard()
+        )
+        return
+
     role = get_role(update)
 
     if role not in ["director", "mechanic", "technadzor", "slesar"]:
