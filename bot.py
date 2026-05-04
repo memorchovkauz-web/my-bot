@@ -335,7 +335,7 @@ def car_buttons_by_firm(firm):
         keyboard.append([
             InlineKeyboardButton(
                 f"{car} | {turi} | {holat}",
-                callback_data=f"car|{car}"
+                callback_data=f"car_{car}"
             )
         ])
 
@@ -1348,8 +1348,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    data = query.data
 
     if query.data == "none":
+        return
+
+    if data.startswith("car_"):
+        car = data.replace("car_", "")
+
+        context.user_data["driver_car"] = car
+        context.user_data["mode"] = "driver_confirm"
+
+        text = f"""
+    📋 Маълумотларни текширинг:
+
+    👤 Исм: {context.user_data.get('driver_name')}
+    👤 Фамилия: {context.user_data.get('driver_surname')}
+    📞 Телефон: {context.user_data.get('phone')}
+    🏢 Фирма: {context.user_data.get('driver_firm')}
+    🚛 Техника: {car}
+
+    Тасдиқлайсизми?
+    """
+
+        await query.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="confirm_driver")],
+                [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")]
+            ])
+        )
+        return
+
+    if data == "confirm_driver":
+        user_id = update.effective_user.id
+
+        add_driver_to_sheet(user_id, context.user_data)
+
+        await query.message.reply_text("✅ Рўйхатдан ўтдингиз. Текширувга юборилди.")
         return
 
     role = get_role(update)
