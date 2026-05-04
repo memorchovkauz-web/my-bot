@@ -32,8 +32,8 @@ USERS = {
     1950294513: {"role": "mechanic", "name": "Механик исми"},
     1026372827: {"role": "mechanic", "name": "Пармонов Гиёс"},
     7421855968: {"role": "mechanic", "name": "{Холикулов Шехроз"},
-    1973869412: {"role": "mechanic", "name": "{офис"},
     492894594: {"role": "technadzor", "name": "Jahongir Ganiyev"},
+    1973869412: {"role": "technadzor", "name": "офис"},
     444444444: {"role": "slesar", "name": "Слесарь исми"},
 }
 
