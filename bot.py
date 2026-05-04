@@ -29,7 +29,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 USERS = {
     492894595: {"role": "director", "name": "Jahongir Ganiyev"},
-    1950294513: {"role": "mechanic", "name": "Механик исми"},
+    1950294510: {"role": "mechanic", "name": "Механик исми"},
     1026372827: {"role": "mechanic", "name": "Пармонов Гиёс"},
     7421855968: {"role": "mechanic", "name": "{Холикулов Шехроз"},
     492894594: {"role": "technadzor", "name": "Jahongir Ganiyev"},
@@ -87,6 +87,10 @@ def is_valid_km(value):
 
 def is_valid_note(value):
     return bool(value and value.strip()) and len(value.strip()) >= 2
+
+def is_valid_name(value):
+    value = value.strip()
+    return value.isalpha() and len(value) >= 2
 
 
 def calculate_duration(start_time, end_time):
@@ -852,6 +856,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
+
+    if text == "🚚 Рўйхатдан ўтиш":
+        context.user_data["mode"] = "driver_name"
+
+        await update.message.reply_text(
+            "🔴 <b>Исмингизни киритинг</b>\n\n"
+            "Мисол: Тешавой",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "driver_name":
+        if not is_valid_name(text):
+            await update.message.reply_text(
+                "❌ Исм фақат ҳарфлардан иборат бўлиши керак.\n\n"
+                "🔴 <b>Мисол: Тешавой</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+
+    if mode == "driver_surname":
+        if not is_valid_name(text):
+            await update.message.reply_text(
+                "❌ Фамилия фақат ҳарфлардан иборат бўлиши керак.\n\n"
+                "🔴 <b>Мисол: Алиев</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["driver_surname"] = text
+        context.user_data["mode"] = "driver_phone"
+
+        await update.message.reply_text(
+            "📞 Телефон рақамингизни юборинг:",
+            reply_markup=phone_keyboard()
+        )
+        return
+
+        context.user_data["driver_name"] = text
+        context.user_data["mode"] = "driver_surname"
+
+        await update.message.reply_text(
+            "🔴 <b>Фамилиянгизни киритинг</b>\n\n"
+            "Мисол: Алиев",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
     
     if mode == "history_custom_period":
         try:
@@ -1559,6 +1615,20 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if context.user_data.get("mode") != "driver_phone":
+            return
+
+        contact = update.message.contact
+
+        context.user_data["phone"] = contact.phone_number
+        context.user_data["mode"] = "driver_firm"
+
+        await update.message.reply_text(
+            "🏢 Қайси фирмада ишлайсиз?",
+            reply_markup=firm_keyboard()
+        )
+
     if mode in ["send_km_photo", "edit_photo"]:
         await update.message.reply_text(
             "❌ Сиздан фақат одометр ёки моточас расмини юборишингизни сўрайман!",
@@ -1662,6 +1732,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("id", get_id))
 app.add_handler(CallbackQueryHandler(handle_callback))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
