@@ -834,6 +834,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
+    text = update.message.text.strip()
+    mode = context.user_data.get("mode")
+
+    if text == "🚚 Рўйхатдан ўтиш":
+        context.user_data["mode"] = "driver_name"
+
+        await update.message.reply_text(
+            "🔴 <b>Исмингизни киритинг</b>\n\nМисол: Тешавой",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
+
     role = get_role(update)
 
     if role not in ["director", "mechanic", "technadzor", "slesar"]:
@@ -842,14 +855,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if driver_status == "Текширувда":
             await update.message.reply_text("⏳ Сизнинг аризангиз ҳали текширувда.")
             return
-  
+
         if driver_status == "Рад этилди":
             await update.message.reply_text("❌ Сизнинг аризангиз рад этилган.")
             return
 
-        if driver_status == "Тасдиқланди":
-            pass
-        else:
+        if driver_status != "Тасдиқланди":
             await update.message.reply_text("Аввал рўйхатдан ўтинг.")
             return
 
