@@ -1615,19 +1615,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if context.user_data.get("mode") != "driver_phone":
-            return
-
-        contact = update.message.contact
-
-        context.user_data["phone"] = contact.phone_number
-        context.user_data["mode"] = "driver_firm"
-
-        await update.message.reply_text(
-            "🏢 Қайси фирмада ишлайсиз?",
-            reply_markup=firm_keyboard()
-        )
+    
 
     if mode in ["send_km_photo", "edit_photo"]:
         await update.message.reply_text(
@@ -1703,6 +1691,20 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text,
         reply_markup=final_confirm_keyboard()
     )
+
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if context.user_data.get("mode") != "driver_phone":
+            return
+
+        contact = update.message.contact
+
+        context.user_data["phone"] = contact.phone_number
+        context.user_data["mode"] = "driver_firm"
+
+        await update.message.reply_text(
+            "🏢 Қайси фирмада ишлайсиз?",
+            reply_markup=firm_keyboard()
+        )
 
 
 class Handler(BaseHTTPRequestHandler):
