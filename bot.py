@@ -197,7 +197,7 @@ def history_period_keyboard():
         [InlineKeyboardButton("📆 Охирги 30 кун", callback_data="period|30")],
         [InlineKeyboardButton("🗓 Шу ой", callback_data="period|this_month")],
         [InlineKeyboardButton("📌 Ўтган ой", callback_data="period|last_month")],
-        [InlineKeyboardButton("📚 Охирги 1 йил", callback_data="period|year")],
+        [InlineKeyboardButton("📆 Санадан–санагача", callback_data="period|custom")],
     ])
 
 
@@ -1225,6 +1225,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data.startswith("period|"):
         period = query.data.split("|", 1)[1]
+        if period == "custom":
+            context.user_data["mode"] = "history_custom_period"
+
+            await query.message.reply_text(
+                "🔴 <b>Қайси давр оралиғини кўрмоқчисиз?</b>\n\n"
+                "Мисол:\n"
+                "01.01.2026-28.04.2026",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+            
         car = context.user_data.get("history_car")
 
         if not car:
@@ -1352,6 +1364,34 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     
     mode = context.user_data.get("mode")
+        if mode == "history_custom_period":
+            try:
+                start_text, end_text = text.split("-")
+
+                start_date = datetime.strptime(start_text.strip(), "%d.%m.%Y")
+                end_date = datetime.strptime(end_text.strip(), "%d.%m.%Y")
+                end_date = end_date.replace(hour=23, minute=59, second=59)
+
+                car = context.user_data.get("history_car")
+
+                if not car:
+                    await update.message.reply_text("❌ Техника танланмаган.")
+                    return
+
+                await send_history_by_date(update.message, car, start_date, end_date)
+
+                context.user_data["mode"] = None
+                return
+
+            except Exception:
+                await update.message.reply_text(
+                    "❌ Сана формати нотўғри.\n\n"
+                    "🔴 <b>Шундай ёзинг:</b>\n"
+                    "01.01.2026-28.04.2026",
+                    parse_mode="HTML",
+                    reply_markup=back_keyboard()
+            )
+            return
 
     if mode in ["write_note_add", "write_note_remove", "edit_note", "reject_reason"]:
         await update.message.reply_text(
