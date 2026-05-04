@@ -243,6 +243,54 @@ def get_car_type(car):
             return row[2].strip()
     return ""
 
+def get_repair_stats(car):
+    rows = remont_ws.get_all_values()[1:]
+
+    kirgan = 0
+    chiqqan = 0
+
+    for row in rows:
+        if len(row) < 6:
+            continue
+
+        if row[2].strip().lower() != car.strip().lower():
+            continue
+
+        status = row[5].strip()
+
+        if status == "Носоз":
+            kirgan += 1
+        elif status in ["Текширувда", "Соз"]:
+            chiqqan += 1
+
+    return kirgan, chiqqan
+
+def history_car_buttons_by_firm(firm):
+    keyboard = []
+
+    for row in get_all_cars():
+        if len(row) < 7:
+            continue
+
+        firm_name = row[0].strip()
+        car = row[1].strip()
+        turi = row[2].strip()
+
+        if firm_name.lower() == firm.strip().lower():
+            kirgan, chiqqan = get_repair_stats(car)
+
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{car} | {turi} | {kirgan} / {chiqqan}",
+                    callback_data=f"car|{car}"
+                )
+            ])
+
+    if not keyboard:
+        keyboard = [[InlineKeyboardButton("❌ Техника топилмади", callback_data="none")]]
+
+    return InlineKeyboardMarkup(keyboard)
+
 
 def car_buttons_by_firm(firm):
     rows_for_buttons = []
@@ -994,7 +1042,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "history_select_car"
 
         await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=back_keyboard())
-        await update.message.reply_text("Техникани танланг:", reply_markup=car_buttons_by_firm(text))
+        await update.message.reply_text("Техникани танланг:", reply_markup=history_car_buttons_by_firm(text))
         return
 
     if text in FIRM_NAMES:
