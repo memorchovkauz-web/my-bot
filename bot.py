@@ -192,6 +192,13 @@ def back_keyboard():
         [KeyboardButton("⬅️ Орқага")]
     ], resize_keyboard=True)
 
+def phone_keyboard():
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("📞 Телефонни юбориш", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
 def push_state(context, new_mode):
     if "history" not in context.user_data:
         context.user_data["history"] = []
