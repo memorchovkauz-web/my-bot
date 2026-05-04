@@ -163,6 +163,14 @@ def firm_keyboard():
         resize_keyboard=True
     )
 
+def car_keyboard():
+    return ReplyKeyboardMarkup([
+        ["30 315ZBA"],
+        ["50 123ABC"],
+        ["60 456DEF"],
+        ["⬅️ Орқага"]
+    ], resize_keyboard=True)
+
 
 def action_keyboard():
     return ReplyKeyboardMarkup([
@@ -893,6 +901,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if mode == "driver_firm":
+        context.user_data["driver_firm"] = text
+        context.user_data["mode"] = "driver_car"
+
+        await update.message.reply_text(
+            f"✅ Фирма: {text}\n\n🚛 Қайси техника ҳайдовчисисиз?",
+            reply_markup=car_keyboard()
+        )
+        return
+
     role = get_role(update)
 
     if role not in ["director", "mechanic", "technadzor", "slesar"]:
@@ -1600,6 +1618,24 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     
     mode = context.user_data.get("mode")
+
+    if mode == "driver_name":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат исм матн кўринишида қабул қилинади.\n\n"
+            "🔴 <b>Исмингизни киритинг</b>\nМисол: Тешавой",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "driver_surname":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат фамилия матн кўринишида қабул қилинади.\n\n"
+            "🔴 <b>Фамилиянгизни киритинг</b>\nМисол: Алиев",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
        
 
     if mode in ["write_note_add", "write_note_remove", "edit_note", "reject_reason"]:
@@ -1663,6 +1699,24 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     mode = context.user_data.get("mode")
+
+    if mode == "driver_name":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат исм матн кўринишида қабул қилинади.\n\n"
+            "🔴 <b>Исмингизни киритинг</b>\nМисол: Тешавой",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "driver_surname":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат фамилия матн кўринишида қабул қилинади.\n\n"
+            "🔴 <b>Фамилиянгизни киритинг</b>\nМисол: Алиев",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
 
     if mode in ["write_note_add", "write_note_remove", "edit_note", "reject_reason"]:
         await update.message.reply_text(
