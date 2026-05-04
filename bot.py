@@ -51,6 +51,7 @@ sheet = client.open(SHEET_NAME)
 
 remont_ws = sheet.worksheet("REMONT")
 mashina_ws = sheet.worksheet("MASHINALAR")
+drivers_ws = sheet.worksheet("DRIVERS")
 
 FIRM_NAMES = [
     "Мемор Уткир Човка",
@@ -131,6 +132,15 @@ def get_role(update):
 def get_user_name(update):
     user = get_user(update)
     return user["name"] if user else "Номаълум"
+
+def get_driver_status(user_id):
+    rows = drivers_ws.get_all_values()[1:]
+
+    for row in rows:
+        if len(row) > 0 and str(row[0]).strip() == str(user_id):
+            return row[6].strip() if len(row) > 6 else ""
+
+    return None
 
 
 def get_user_ids_by_role(role_name):
@@ -708,6 +718,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["history"] = []
     
     role = get_role(update)
+    driver_status = get_driver_status(update.effective_user.id)
+
+    if role is None:
+        if driver_status == "Текширувда":
+            await update.message.reply_text("⏳ Сизнинг аризангиз текширувда.")
+            return
+
+        if driver_status == "Рад этилди":
+            await update.message.reply_text("❌ Сизнинг аризангиз рад этилган.")
+            return
+
+        if driver_status == "Тасдиқланди":
+            await update.message.reply_text("Хуш келибсиз!")
+            return
+
+        await update.message.reply_text(
+            "🚚 Ҳайдовчи сифатида рўйхатдан ўтинг:",
+            reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton("🚚 Рўйхатдан ўтиш")]],
+                resize_keyboard=True
+            )
+        )
+        context.user_data["mode"] = "driver_register_start"
+        return
 
     if role not in ["director", "mechanic", "technadzor", "slesar"]:
         await deny(update)
@@ -800,8 +834,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     role = get_role(update)
 
     if role not in ["director", "mechanic", "technadzor", "slesar"]:
-        await deny(update)
-        return
+        driver_status = get_driver_status(update.effective_user.id)
+
+        if driver_status == "Текширувда":
+            await update.message.reply_text("⏳ Сизнинг аризангиз ҳали текширувда.")
+            return
+  
+        if driver_status == "Рад этилди":
+            await update.message.reply_text("❌ Сизнинг аризангиз рад этилган.")
+            return
+
+        if driver_status == "Тасдиқланди":
+            pass
+        else:
+            await update.message.reply_text("Аввал рўйхатдан ўтинг.")
+            return
 
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
