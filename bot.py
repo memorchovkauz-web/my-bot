@@ -177,6 +177,17 @@ def back_keyboard():
         [KeyboardButton("⬅️ Орқага")]
     ], resize_keyboard=True)
 
+def push_state(context, new_mode):
+    if "history" not in context.user_data:
+        context.user_data["history"] = []
+
+    current_mode = context.user_data.get("mode")
+
+    if current_mode and current_mode != new_mode:
+        context.user_data["history"].append(current_mode)
+
+    context.user_data["mode"] = new_mode
+
 
 def history_period_keyboard():
     return InlineKeyboardMarkup([
@@ -557,7 +568,8 @@ async def send_history_by_date(message, car, start_date, end_date):
             )
 
         sort_time = start_time or end_time or sana_text
-        text_result.append((sort_time, block, video_id))
+        photo_id = row[8] if len(row) > 8 else ""
+        text_result.append((sort_time, block, video_id, photo_id))
 
     if not text_result:
         await message.reply_text(
@@ -570,8 +582,11 @@ async def send_history_by_date(message, car, start_date, end_date):
 
     await message.reply_text("📚 Техника историяси:")
 
-    for _, block, video_id in text_result[-20:]:
+    for _, block, video_id, photo_id in text_result[-20:]:
         await message.reply_text(block)
+
+        if photo_id:
+            await safe_send_photo(message.get_bot(), message.chat_id, photo_id)
 
         if video_id:
             await safe_send_video(message.get_bot(), message.chat_id, video_id)
@@ -640,6 +655,8 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
+    context.user_data["history"] = []
+    
     role = get_role(update)
 
     if role not in ["director", "mechanic", "technadzor", "slesar"]:
@@ -766,17 +783,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
         if mode == "choose_car":
-            context.user_data["mode"] = "choose_repair_type"
+            push_state(context, "choose_repair_type")
             await update.message.reply_text("Ремонт турини танланг:", reply_markup=repair_type_keyboard())
             return
 
         if mode == "write_km":
-            context.user_data["mode"] = "choose_car"
+            push_state(context, "choose_car")
             await update.message.reply_text("Техникани танланг:", reply_markup=car_buttons_by_firm(context.user_data.get("firm")))
             return
 
         if mode == "send_km_photo":
-            context.user_data["mode"] = "write_km"
+            push_state(context, "write_km")
             await update.message.reply_text(
                 "🔴 <b>КМ/моточасни қайта киритинг:</b>",
                 parse_mode="HTML",
@@ -785,7 +802,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if mode == "write_note_add":
-            context.user_data["mode"] = "send_km_photo"
+            push_state(context, "send_km_photo")
             await update.message.reply_text(
                 "🔴 <b>Одометр ёки моточас расмини қайта юборинг:</b>",
                 parse_mode="HTML",
