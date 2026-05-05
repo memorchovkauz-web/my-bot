@@ -878,7 +878,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
-    if text == "🚚 Рўйхатдан ўтиш":
+    if text == "🚚 Рўйхатдан ўтиш" and mode in [None, "driver_register_start"]:
         context.user_data["mode"] = "driver_name"
 
         await update.message.reply_text(
