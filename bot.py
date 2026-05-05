@@ -886,6 +886,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=ReplyKeyboardRemove()
         )
+        return
 
     if mode == "driver_name":
         if not is_valid_name(text):
@@ -900,12 +901,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["driver_name"] = text
         context.user_data["mode"] = "driver_surname"
 
-        await update.message.reply_text(
-            "❌ Фамилия фақат ҳарфлардан иборат бўлиши керак.\n\n"
-            "🔴 <b>Мисол: Алиев</b>",
-            parse_mode="HTML",
-            reply_markup=ReplyKeyboardRemove()
-        )
         return
 
     if mode == "driver_surname":
@@ -957,7 +952,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "driver_car"
 
         await update.message.reply_text(
-            f"🚛 Қайси техника ҳайдовчисисиз?",
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=back_keyboard()
+        )
+
+        await update.message.reply_text(
+            "🚛 Қайси техника ҳайдовчисисиз?",
             reply_markup=car_buttons_by_firm(text)
         )
         return
