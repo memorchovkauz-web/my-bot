@@ -929,9 +929,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "driver_car"
 
         await update.message.reply_text(
-            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
-            reply_markup=back_keyboard()
+            f"🏢 Фирма: {text}\n\n🚛 Қайси техника ҳайдовчисисиз?",
+            reply_markup=car_buttons_by_firm(text)
         )
+        return
 
         await update.message.reply_text(
             f"✅ Фирма: {text}\n\n🚛 Қайси техника ҳайдовчисисиз?",
