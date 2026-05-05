@@ -1539,8 +1539,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("car_"):
         try:
-            await query.message.delete()
-        except Exception:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except:
             pass
 
         car = data.replace("car_", "")
@@ -1551,7 +1551,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_driver_confirm(query.message, context)
         return
 
-    if data == "":
+    if data == "confirm_driver":
         user_id = update.effective_user.id
 
         add_driver_to_sheet(user_id, context.user_data)
