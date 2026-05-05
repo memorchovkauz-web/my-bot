@@ -1415,16 +1415,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         drivers_ws.append_row([
             user_id,
-            context.user_data.get("driver_name"),
-            context.user_data.get("driver_surname"),
-            context.user_data.get("phone"),
-            context.user_data.get("driver_firm"),
-            context.user_data.get("driver_car"),
+            context.user_data.get("driver_name", ""),
+            context.user_data.get("driver_surname", ""),
+            context.user_data.get("phone", ""),
+            context.user_data.get("driver_firm", ""),
+            context.user_data.get("driver_car", ""),
             "Текширувда",
             now_text()
         ])
 
-        await query.message.reply_text("✅ Рўйхатдан ўтдингиз. Текширувга юборилди.")
+        await query.message.reply_text(
+            "✅ Рўйхатдан ўтдингиз. Текширувга юборилди."
+        )
+
         context.user_data.clear()
         return
 
