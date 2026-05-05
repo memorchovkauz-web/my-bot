@@ -146,6 +146,15 @@ def get_driver_status(user_id):
 
     return None
 
+def get_driver_car(user_id):
+    rows = drivers_ws.get_all_values()[1:]
+
+    for row in rows:
+        if len(row) > 5 and str(row[0]).strip() == str(user_id):
+            return row[5].strip()
+
+    return ""
+
 def update_driver_status(user_id, status):
     rows = drivers_ws.get_all_values()
 
@@ -210,6 +219,21 @@ def phone_keyboard():
         one_time_keyboard=True
     )
 
+def driver_main_keyboard(fuel_type=""):
+    buttons = [
+        [KeyboardButton("⛽ Ёқилғи ҳисоботи")],
+        [KeyboardButton("📄 Техника ҳужжатлари")],
+        [KeyboardButton("📦 Инвентар")],
+    ]
+
+    if fuel_type.lower() == "газ":
+        buttons.insert(1, [KeyboardButton("🟢 Газ баллон маълумоти")])
+
+    if fuel_type.lower() == "дизел":
+        buttons.insert(1, [KeyboardButton("🟡 Дизел лимит маълумоти")])
+
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+
 def push_state(context, new_mode):
     if "history" not in context.user_data:
         context.user_data["history"] = []
@@ -272,6 +296,12 @@ def get_car_type(car):
     for row in get_all_cars():
         if len(row) > 2 and row[1].strip().lower() == car.strip().lower():
             return row[2].strip()
+    return ""
+
+def get_car_fuel_type(car):
+    for row in get_all_cars():
+        if len(row) > 7 and row[1].strip().lower() == car.strip().lower():
+            return row[7].strip()
     return ""
 
 def get_repair_stats(car):
@@ -785,8 +815,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if driver_status == "Тасдиқланди":
-            await update.message.reply_text("Хуш келибсиз!")
-            return
+            driver_car = get_driver_car(update.effective_user.id)
+            fuel_type = get_car_fuel_type(driver_car)
+
+        await update.message.reply_text(
+            f"🚚 Ҳайдовчи менюси\n\n"
+            f"🚛 Техника: {driver_car}\n"
+            f"⛽ Ёқилғи тури: {fuel_type}",
+            reply_markup=driver_main_keyboard(fuel_type)
+        )
+        return
 
         await update.message.reply_text(
             "🚚 Ҳайдовчи сифатида рўйхатдан ўтинг:",
