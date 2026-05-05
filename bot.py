@@ -893,6 +893,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Исм фақат ҳарфлардан иборат бўлиши керак.\n\n"
                 "🔴 <b>Мисол: Тешавой</b>",
                 parse_mode="HTML",
+                reply_markup=ReplyKeyboardRemove()
             )
             return
 
@@ -900,7 +901,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "driver_surname"
 
         await update.message.reply_text(
-            "🔴 <b>Фамилиянгизни киритинг</b>\n\nМисол: Алиев",
+            "❌ Фамилия фақат ҳарфлардан иборат бўлиши керак.\n\n"
+            "🔴 <b>Мисол: Алиев</b>",
             parse_mode="HTML",
             reply_markup=ReplyKeyboardRemove()
         )
