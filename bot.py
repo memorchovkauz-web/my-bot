@@ -371,10 +371,12 @@ async def show_driver_confirm(message, context):
     )
 
     await message.reply_text(
-        "Танланг:",
+        text + "\n\nТанланг:",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="confirm_driver")],
-            [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")]
+            [
+                InlineKeyboardButton("✅ Тасдиқлаш", callback_data="confirm_driver"),
+                InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")
+            ]
         ])
     )
 
