@@ -366,8 +366,13 @@ async def show_driver_confirm(message, context):
 
     await message.reply_text(
         text,
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    await message.reply_text(
+        "Танланг:",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="confirm_driver")],
+            [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="")],
             [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")]
         ])
     )
@@ -1460,7 +1465,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "none":
         return
 
-    if data == "confirm_driver":
+    if data == "":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
@@ -1571,13 +1576,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="confirm_driver")],
+                [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="")],
                 [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")]
             ])
         )
         return
 
-    if data == "confirm_driver":
+    if data == "":
         user_id = update.effective_user.id
 
         add_driver_to_sheet(user_id, context.user_data)
