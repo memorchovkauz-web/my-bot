@@ -881,7 +881,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🔴 <b>Исмингизни киритинг</b>\n\nМисол: Тешавой",
             parse_mode="HTML",
-            reply_markup=back_keyboard()
         )
         return
 
@@ -891,7 +890,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Исм фақат ҳарфлардан иборат бўлиши керак.\n\n"
                 "🔴 <b>Мисол: Тешавой</b>",
                 parse_mode="HTML",
-                reply_markup=back_keyboard()
             )
             return
 
@@ -901,7 +899,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🔴 <b>Фамилиянгизни киритинг</b>\n\nМисол: Алиев",
             parse_mode="HTML",
-            reply_markup=back_keyboard()
         )
         return
 
@@ -911,16 +908,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Фамилия фақат ҳарфлардан иборат бўлиши керак.\n\n"
                 "🔴 <b>Мисол: Алиев</b>",
                 parse_mode="HTML",
-                reply_markup=back_keyboard()
             )
             return
 
         context.user_data["driver_surname"] = text
-        context.user_data["mode"] = "driver_phone_edit"
+        context.user_data["mode"] = "driver_phone"
         
         await update.message.reply_text(
             "📞 Телефон рақамингизни юборинг:",
-            reply_markup=phone_keyboard()
         )
         return
 
@@ -1079,6 +1074,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "⬅️ Орқага":
+        if mode == "driver_car":
+            context.user_data["mode"] = "driver_firm"
+
+            await update.message.reply_text(
+                "🏢 Қайси фирмада ишлайсиз?",
+                reply_markup=firm_keyboard()
+            )
+            return
+            
         if mode == "choose_repair_type":
             if role == "technadzor":
                 context.user_data["mode"] = "select_firm_for_add"
@@ -1409,6 +1413,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "confirm_driver":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         user_id = update.effective_user.id
 
         drivers_ws.append_row([
@@ -1431,6 +1440,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     if data == "edit_driver":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         await query.message.reply_text(
             "✏️ Қайси маълумотни таҳрирлайсиз?",
             reply_markup=driver_edit_keyboard()
@@ -1484,6 +1498,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     if data.startswith("car_"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         car = data.replace("car_", "")
 
         context.user_data["driver_car"] = car
