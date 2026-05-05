@@ -932,6 +932,63 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
+    if mode == "fuel_gas_video":
+        await update.message.reply_text(
+            "❌ Бу босқичда матн қабул қилинмайди.\n\n"
+            "🎥 Фақат видео юборинг."
+        )
+        return
+
+    if mode == "fuel_gas_photo":
+        await update.message.reply_text(
+            "❌ Бу босқичда матн қабул қилинмайди.\n\n"
+            "📷 Фақат ведомость расмини юборинг."
+        )
+        return
+
+    if text == "⛽ Ёқилғи ҳисоботи":
+        driver_car = get_driver_car(update.effective_user.id)
+        fuel_type = get_car_fuel_type(driver_car)
+
+        if fuel_type.lower() != "газ":
+            await update.message.reply_text("Бу бўлим ҳозирча фақат газлик техникалар учун.")
+            return
+
+        context.user_data["mode"] = "fuel_gas_km"
+        context.user_data["fuel_car"] = driver_car
+        context.user_data["fuel_type"] = fuel_type
+
+        await update.message.reply_text(
+            "⛽ Газ ёқилғи ҳисоботи\n\n"
+            "🔴 Спидометр кўрсаткичини киритинг (КМ)\n\n"
+            "Мисол: 15300",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if mode == "fuel_gas_km":
+        if not text.isdigit():
+            await update.message.reply_text(
+                "❌ Фақат рақам киритинг.\n\n"
+                "🔴 Спидометр кўрсаткичини киритинг (КМ)\n"
+                "Мисол: 15300"
+            )
+            return
+
+        context.user_data["fuel_km"] = text
+        context.user_data["mode"] = "fuel_gas_video"
+
+        await update.message.reply_text(
+            "🎥 Автомобил рақами ва ёқилғи қуйиш калонкаси якуний кўрсаткичини "
+            "думалоқ видео қилиб ташланг.\n\n"
+            "⏱ Видео 5 сониядан кам бўлмасин."
+        )
+        return
+
+    if mode in ["fuel_gas_video", "fuel_gas_photo"]:
+        await update.message.reply_text("❌ Бу босқичда матн қабул қилинмайди. Тўғри маълумот юборинг.")
+        return
+
     if text == "🚚 Рўйхатдан ўтиш" and mode in [None, "driver_register_start"]:
         context.user_data["mode"] = "driver_name"
 
@@ -1934,6 +1991,30 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     mode = context.user_data.get("mode")
 
+    if mode == "fuel_gas_video":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат видео қабул қилинади.\n\n"
+            "🎥 Автомобил рақами ва калонка якуний кўрсаткичини видео қилиб юборинг."
+        )
+        return
+
+    if mode == "fuel_gas_photo":
+        context.user_data["fuel_photo_id"] = update.message.photo[-1].file_id
+        context.user_data["mode"] = "fuel_gas_done"
+
+        await update.message.reply_text(
+            "✅ Ёқилғи ҳисоботи қабул қилинди.\n\n"
+            f"🚛 Техника: {context.user_data.get('fuel_car')}\n"
+            f"⛽ Ёқилғи тури: {context.user_data.get('fuel_type')}\n"
+            f"📍 Спидометр: {context.user_data.get('fuel_km')} км\n"
+            f"🎥 Видео: сақланди ✅\n"
+            f"📷 Ведомость расми: сақланди ✅",
+            reply_markup=driver_main_keyboard(context.user_data.get("fuel_type", ""))
+        )
+
+        context.user_data.clear()
+        return
+
     if mode in ["driver_phone", "driver_phone_edit"]:
         await update.message.reply_text(
             "❌ Бу босқичда фақат телефон рақам қабул қилинади.\n\n"
@@ -2023,6 +2104,40 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     mode = context.user_data.get("mode")
+
+    if mode == "fuel_gas_photo":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат ведомость расми қабул қилинади.\n\n"
+            "📷 Ведомостьга қўл қўйиб, расмга олиб юборинг."
+        )
+        return
+
+    if mode == "fuel_gas_video":
+        if update.message.video_note:
+            video_id = update.message.video_note.file_id
+            duration = update.message.video_note.duration
+        elif update.message.video:
+            video_id = update.message.video.file_id
+            duration = update.message.video.duration
+        else:
+            await update.message.reply_text("❌ Фақат видео юборинг.")
+            return
+
+        if duration < 5:
+            await update.message.reply_text(
+                "❌ Видео 5 сониядан кам бўлмасин.\n\n"
+                "🎥 Автомобил рақами ва калонка якуний кўрсаткичини қайта видео қилиб юборинг."
+            )
+            return
+
+        context.user_data["fuel_video_id"] = video_id
+        context.user_data["mode"] = "fuel_gas_photo"
+
+        await update.message.reply_text(
+            "✅ Видео сақланди.\n\n"
+            "📷 Энди ведомостьга қўл қўйиб, расмга олиб ташланг."
+        )
+        return
 
     if mode in ["driver_phone", "driver_phone_edit"]:
         await update.message.reply_text(
