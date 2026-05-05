@@ -911,6 +911,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+    if mode == "driver_phone":
+        phone = text.replace(" ", "").replace("+", "")
+
+        if not phone.isdigit() or len(phone) != 12 or not phone.startswith("998"):
+            await update.message.reply_text(
+                "❌ Телефон рақам нотўғри.\n\n"
+                "Фақат рақам киритинг ёки тугма орқали юборинг.\n"
+                "Мисол: 998939992020",
+                reply_markup=phone_keyboard()
+            )
+            return
+
+        context.user_data["phone"] = phone
+        context.user_data["mode"] = "driver_firm"
+
+        await update.message.reply_text(
+            "🏢 Қайси фирмада ишлайсиз?",
+            reply_markup=firm_keyboard()
+        )
+        return    
+
         context.user_data["driver_surname"] = text
         context.user_data["mode"] = "driver_phone"
         
@@ -923,6 +944,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode == "driver_firm":
         context.user_data["driver_firm"] = text
         context.user_data["mode"] = "driver_car"
+
+        await update.message.reply_text(
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=back_keyboard()
+        )
 
         await update.message.reply_text(
             f"🏢 Фирма: {text}\n\n🚛 Қайси техника ҳайдовчисисиз?",
