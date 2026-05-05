@@ -1353,6 +1353,37 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "none":
         return
 
+    if data == "confirm_driver":
+        user_id = update.effective_user.id
+
+        drivers_ws.append_row([
+            user_id,
+            context.user_data.get("driver_name"),
+            context.user_data.get("driver_surname"),
+            context.user_data.get("phone"),
+            context.user_data.get("driver_firm"),
+            context.user_data.get("driver_car"),
+            "Текширувда",
+            now_text()
+        ])
+
+        await query.message.reply_text("✅ Рўйхатдан ўтдингиз. Текширувга юборилди.")
+        context.user_data.clear()
+        return
+
+
+    if data == "edit_driver":
+        context.user_data["mode"] = "driver_name"
+
+        await query.message.reply_text(
+            "✏️ Маълумотларни қайта киритамиз.\n\n"
+            "🔴 <b>Исмингизни киритинг</b>\n\n"
+            "Мисол: Тешавой",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+        return
+
     if data.startswith("car_"):
         car = data.replace("car_", "")
 
