@@ -934,12 +934,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-        await update.message.reply_text(
-            f"✅ Фирма: {text}\n\n🚛 Қайси техника ҳайдовчисисиз?",
-            reply_markup=car_buttons_by_firm(text)
-        )
-        return
-
     if mode == "driver_edit_name":
         if not is_valid_name(text):
             await update.message.reply_text(
