@@ -344,6 +344,34 @@ def car_buttons_by_firm(firm):
 
     return InlineKeyboardMarkup(keyboard)
 
+def driver_edit_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👤 Исм", callback_data="driver_edit|name")],
+        [InlineKeyboardButton("👤 Фамилия", callback_data="driver_edit|surname")],
+        [InlineKeyboardButton("📞 Телефон", callback_data="driver_edit|phone")],
+        [InlineKeyboardButton("🏢 Фирма", callback_data="driver_edit|firm")],
+        [InlineKeyboardButton("🚛 Техника", callback_data="driver_edit|car")],
+    ])
+
+async def show_driver_confirm(message, context):
+    text = (
+        "📋 Маълумотларни текширинг:\n\n"
+        f"👤 Исм: {context.user_data.get('driver_name')}\n"
+        f"👤 Фамилия: {context.user_data.get('driver_surname')}\n"
+        f"📞 Телефон: {context.user_data.get('phone')}\n"
+        f"🏢 Фирма: {context.user_data.get('driver_firm')}\n"
+        f"🚛 Техника: {context.user_data.get('driver_car')}\n\n"
+        "Тасдиқлайсизми?"
+    )
+
+    await message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="confirm_driver")],
+            [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")]
+        ])
+    )
+
 
 def car_buttons_by_firm_and_status(firm, status_filter):
     keyboard = []
@@ -885,8 +913,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         context.user_data["driver_surname"] = text
-        context.user_data["mode"] = "driver_phone"
-
+        context.user_data["mode"] = "driver_phone_edit"
+        
         await update.message.reply_text(
             "📞 Телефон рақамингизни юборинг:",
             reply_markup=phone_keyboard()
@@ -906,6 +934,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Фирма: {text}\n\n🚛 Қайси техника ҳайдовчисисиз?",
             reply_markup=car_buttons_by_firm(text)
         )
+        return
+
+    if mode == "driver_edit_name":
+        if not is_valid_name(text):
+            await update.message.reply_text(
+                "❌ Исм фақат ҳарфлардан иборат бўлиши керак.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["driver_name"] = text
+        context.user_data["mode"] = "driver_confirm"
+
+        await show_driver_confirm(update.message, context)
+        return
+
+
+    if mode == "driver_edit_surname":
+        if not is_valid_name(text):
+            await update.message.reply_text(
+                "❌ Фамилия фақат ҳарфлардан иборат бўлиши керак.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["driver_surname"] = text
+        context.user_data["mode"] = "driver_confirm"
+
+        await show_driver_confirm(update.message, context)
         return
 
     role = get_role(update)
@@ -1373,16 +1430,57 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     if data == "edit_driver":
-        context.user_data["mode"] = "driver_name"
-
         await query.message.reply_text(
-            "✏️ Маълумотларни қайта киритамиз.\n\n"
-            "🔴 <b>Исмингизни киритинг</b>\n\n"
-            "Мисол: Тешавой",
-            parse_mode="HTML",
-            reply_markup=back_keyboard()
+            "✏️ Қайси маълумотни таҳрирлайсиз?",
+            reply_markup=driver_edit_keyboard()
         )
         return
+
+    if data.startswith("driver_edit|"):
+        field = data.split("|", 1)[1]
+
+        if field == "name":
+            context.user_data["mode"] = "driver_edit_name"
+            await query.message.reply_text(
+                "🔴 <b>Янги исмни киритинг</b>\n\nМисол: Тешавой",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if field == "surname":
+            context.user_data["mode"] = "driver_edit_surname"
+            await query.message.reply_text(
+                "🔴 <b>Янги фамилияни киритинг</b>\n\nМисол: Алиев",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if field == "phone":
+            context.user_data["mode"] = "driver_phone"
+            await query.message.reply_text(
+                "📞 Янги телефон рақамни юборинг:",
+                reply_markup=phone_keyboard()
+            )
+            return
+
+        if field == "firm":
+            context.user_data["mode"] = "driver_edit_firm"
+            await query.message.reply_text(
+                "🏢 Янги фирмани танланг:",
+                reply_markup=firm_keyboard()
+            )
+            return
+
+        if field == "car":
+            firm = context.user_data.get("driver_firm")
+            context.user_data["mode"] = "driver_edit_car"
+            await query.message.reply_text(
+                "🚛 Янги техникани танланг:",
+                reply_markup=car_buttons_by_firm(firm)
+            )
+            return
 
     if data.startswith("car_"):
         car = data.replace("car_", "")
@@ -1871,8 +1969,14 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         contact = update.message.contact
-
+    
         context.user_data["phone"] = contact.phone_number
+
+        if context.user_data.get("mode") == "driver_phone_edit":
+            context.user_data["mode"] = "driver_confirm"
+            await show_driver_confirm(update.message, context)
+            return
+
         context.user_data["mode"] = "driver_firm"
 
         await update.message.reply_text(
