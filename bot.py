@@ -11,6 +11,7 @@ from google.oauth2.service_account import Credentials
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
     KeyboardButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
