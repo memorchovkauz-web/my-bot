@@ -373,7 +373,7 @@ async def show_driver_confirm(message, context):
     await message.reply_text(
         "Танланг:",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="")],
+            [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="confirm_driver")],
             [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")]
         ])
     )
@@ -1461,7 +1461,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "none":
         return
 
-    if data == "":
+    if data == "confirm_driver":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
@@ -1548,34 +1548,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("car_"):
         try:
-            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.delete()
         except Exception:
             pass
-            
+
         car = data.replace("car_", "")
 
         context.user_data["driver_car"] = car
         context.user_data["mode"] = "driver_confirm"
 
-        text = f"""
-    📋 Маълумотларни текширинг:
-
-    👤 Исм: {context.user_data.get('driver_name')}
-    👤 Фамилия: {context.user_data.get('driver_surname')}
-    📞 Телефон: {context.user_data.get('phone')}
-    🏢 Фирма: {context.user_data.get('driver_firm')}
-    🚛 Техника: {car}
-
-    Тасдиқлайсизми?
-    """
-
-        await query.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Тасдиқлаш", callback_data="")],
-                [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")]
-            ])
-        )
+        await show_driver_confirm(query.message, context)
         return
 
     if data == "":
