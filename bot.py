@@ -982,7 +982,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_valid_name(text):
             await update.message.reply_text(
                 "❌ Исм фақат ҳарфлардан иборат бўлиши керак.",
-                reply_markup=back_keyboard()
+                reply_markup=ReplyKeyboardRemove()
             )
             return
 
@@ -997,7 +997,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_valid_name(text):
             await update.message.reply_text(
                 "❌ Фамилия фақат ҳарфлардан иборат бўлиши керак.",
-                reply_markup=back_keyboard()
+                reply_markup=ReplyKeyboardRemove()
             )
             return
 
@@ -1033,7 +1033,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Исм фақат ҳарфлардан иборат бўлиши керак.\n\n"
                 "🔴 <b>Мисол: Тешавой</b>",
                 parse_mode="HTML",
-                reply_markup=back_keyboard()
+                reply_markup=ReplyKeyboardRemove()
             )
             return
 
@@ -1044,7 +1044,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Фамилия фақат ҳарфлардан иборат бўлиши керак.\n\n"
                 "🔴 <b>Мисол: Алиев</b>",
                 parse_mode="HTML",
-                reply_markup=back_keyboard()
+                reply_markup=ReplyKeyboardRemove()
             )
             return
 
@@ -1064,7 +1064,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🔴 <b>Фамилиянгизни киритинг</b>\n\n"
             "Мисол: Алиев",
             parse_mode="HTML",
-            reply_markup=back_keyboard()
+            reply_markup=ReplyKeyboardRemove()
         )
         return
     
