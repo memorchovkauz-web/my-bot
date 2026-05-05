@@ -1029,17 +1029,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
-    if text == "🚚 Рўйхатдан ўтиш":
-        context.user_data["mode"] = "driver_name"
-
-        await update.message.reply_text(
-            "🔴 <b>Исмингизни киритинг</b>\n\n"
-            "Мисол: Тешавой",
-            parse_mode="HTML",
-            reply_markup=back_keyboard()
-        )
-        return
-
     if mode == "driver_name":
         if not is_valid_name(text):
             await update.message.reply_text(
