@@ -366,11 +366,6 @@ async def show_driver_confirm(message, context):
     )
 
     await message.reply_text(
-        text,
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-    await message.reply_text(
         text + "\n\nТанланг:",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -889,8 +884,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🔴 <b>Исмингизни киритинг</b>\n\nМисол: Тешавой",
             parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
         )
-        return
 
     if mode == "driver_name":
         if not is_valid_name(text):
@@ -907,6 +902,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🔴 <b>Фамилиянгизни киритинг</b>\n\nМисол: Алиев",
             parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
         )
         return
 
@@ -1492,6 +1488,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("driver_edit|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         field = data.split("|", 1)[1]
 
         if field == "name":
