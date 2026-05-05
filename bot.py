@@ -364,6 +364,10 @@ async def show_driver_confirm(message, context):
         f"🚛 Техника: {context.user_data.get('driver_car')}\n\n"
         "Тасдиқлайсизми?"
     )
+    await message.reply_text(
+        "✅ Техника танланди.",
+        reply_markup=ReplyKeyboardRemove()
+    )    
 
     await message.reply_text(
         text + "\n\nТанланг:",
@@ -900,7 +904,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["driver_name"] = text
         context.user_data["mode"] = "driver_surname"
-
+        
+        await update.message.reply_text(
+            "🔴 <b>Фамилиянгизни киритинг</b>\n\nМисол: Алиев",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return
 
     if mode == "driver_surname":
