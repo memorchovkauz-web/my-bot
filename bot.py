@@ -869,6 +869,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
+    if update.message.contact:
+        return
+
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
@@ -1968,24 +1971,26 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if context.user_data.get("mode") != "driver_phone":
-            return
+    mode = context.user_data.get("mode")
 
-        contact = update.message.contact
-    
-        context.user_data["phone"] = contact.phone_number
+    if mode not in ["driver_phone", "driver_phone_edit"]:
+        return
 
-        if context.user_data.get("mode") == "driver_phone_edit":
-            context.user_data["mode"] = "driver_confirm"
-            await show_driver_confirm(update.message, context)
-            return
+    contact = update.message.contact
+    context.user_data["phone"] = contact.phone_number
 
-        context.user_data["mode"] = "driver_firm"
+    if mode == "driver_phone_edit":
+        context.user_data["mode"] = "driver_confirm"
+        await show_driver_confirm(update.message, context)
+        return
 
-        await update.message.reply_text(
-            "🏢 Қайси фирмада ишлайсиз?",
-            reply_markup=firm_keyboard()
-        )
+    context.user_data["mode"] = "driver_firm"
+
+    await update.message.reply_text(
+        "🏢 Қайси фирмада ишлайсиз?",
+        reply_markup=firm_keyboard()
+    )
+    return
 
 
 class Handler(BaseHTTPRequestHandler):
