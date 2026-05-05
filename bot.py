@@ -805,7 +805,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     role = get_role(update)
     driver_status = get_driver_status(update.effective_user.id)
 
-    if role is None:
+        if role is None:
         if driver_status == "Текширувда":
             await update.message.reply_text("⏳ Сизнинг аризангиз текширувда.")
             return
@@ -818,13 +818,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             driver_car = get_driver_car(update.effective_user.id)
             fuel_type = get_car_fuel_type(driver_car)
 
-        await update.message.reply_text(
-            f"🚚 Ҳайдовчи менюси\n\n"
-            f"🚛 Техника: {driver_car}\n"
-            f"⛽ Ёқилғи тури: {fuel_type}",
-            reply_markup=driver_main_keyboard(fuel_type)
-        )
-        return
+            await update.message.reply_text(
+                f"🚚 Ҳайдовчи менюси\n\n"
+                f"🚛 Техника: {driver_car}\n"
+                f"⛽ Ёқилғи тури: {fuel_type}",
+                reply_markup=driver_main_keyboard(fuel_type)
+            )
+            return
 
         await update.message.reply_text(
             "🚚 Ҳайдовчи сифатида рўйхатдан ўтинг:",
