@@ -957,6 +957,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if mode == "driver_edit_firm":
+        context.user_data["driver_firm"] = text
+        context.user_data["driver_car"] = ""
+        context.user_data["mode"] = "driver_edit_car"
+
+        await update.message.reply_text(
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=back_keyboard()
+        )
+
+        await update.message.reply_text(
+            f"🏢 Янги фирма: {text}\n\n🚛 Энди техникани қайта танланг:",
+            reply_markup=car_buttons_by_firm(text)
+        )
+        return
+
     if mode == "driver_edit_name":
         if not is_valid_name(text):
             await update.message.reply_text(
@@ -1829,6 +1845,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     mode = context.user_data.get("mode")
 
+    if mode in ["driver_phone", "driver_phone_edit"]:
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат телефон рақам қабул қилинади.\n\n"
+            "Мисол: 998939992020",
+            reply_markup=phone_keyboard()
+        )
+        return
+
     if mode == "driver_name":
         await update.message.reply_text(
             "❌ Бу босқичда фақат исм матн кўринишида қабул қилинади.\n\n"
@@ -1909,6 +1933,14 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     mode = context.user_data.get("mode")
+
+    if mode in ["driver_phone", "driver_phone_edit"]:
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат телефон рақам қабул қилинади.\n\n"
+            "Мисол: 998939992020",
+            reply_markup=phone_keyboard()
+        )
+        return
 
     if mode == "driver_name":
         await update.message.reply_text(
