@@ -1495,7 +1495,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
-            
+
         await query.message.reply_text(
             "✏️ Қайси маълумотни таҳрирлайсиз?",
             reply_markup=driver_edit_keyboard()
