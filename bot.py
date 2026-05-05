@@ -875,9 +875,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
-    if text == "🚚 Рўйхатдан ўтиш":
-        context.user_data["mode"] = "driver_name"
-
         await update.message.reply_text(
             "🔴 <b>Исмингизни киритинг</b>\n\nМисол: Тешавой",
             parse_mode="HTML",
@@ -987,7 +984,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     role = get_role(update)
 
-    if role not in ["director", "mechanic", "technadzor", "slesar"]:
+    if role not in ["director", "mechanic", "technadzor", "slesar"] and not str(context.user_data.get("mode", "")).startswith("driver"):
         driver_status = get_driver_status(update.effective_user.id)
 
         if driver_status == "Текширувда":
