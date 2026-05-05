@@ -1916,12 +1916,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    role = get_role(update)
-
-    if role not in ["director", "mechanic", "technadzor", "slesar"]:
-        await deny(update)
-        return
-
+    
     mode = context.user_data.get("mode")
 
     if mode in ["driver_phone", "driver_phone_edit"]:
@@ -1948,6 +1943,12 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=back_keyboard()
         )
+        return
+
+    role = get_role(update)
+
+    if role not in ["director", "mechanic", "technadzor", "slesar"]:
+        await deny(update)
         return
 
     if mode in ["write_note_add", "write_note_remove", "edit_note", "reject_reason"]:
