@@ -146,6 +146,16 @@ def get_driver_status(user_id):
 
     return None
 
+def update_driver_status(user_id, status):
+    rows = drivers_ws.get_all_values()
+
+    for i, row in enumerate(rows, start=1):
+        if len(row) > 0 and str(row[0]).strip() == str(user_id):
+            drivers_ws.update_cell(i, 7, status)  # G ustun
+            return True
+
+    return False
+
 
 def get_user_ids_by_role(role_name):
     return [
@@ -1459,6 +1469,38 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "none":
         return
 
+    if data.startswith("approve_driver|"):
+        driver_id = data.split("|")[1]
+
+        update_driver_status(driver_id, "Тасдиқланди")
+
+        try:
+            await context.bot.send_message(
+                chat_id=int(driver_id),
+                text="✅ Маълумотларингиз тасдиқланди.\nБотдан фойдаланишингиз мумкин."
+            )
+        except Exception:
+            pass
+
+        await query.message.reply_text("✅ Ҳайдовчи тасдиқланди")
+        return
+
+    if data.startswith("reject_driver|"):
+        driver_id = data.split("|")[1]
+
+        update_driver_status(driver_id, "Рад этилди")
+
+        try:
+            await context.bot.send_message(
+                chat_id=int(driver_id),
+                text="❌ Маълумотларингиз рад этилди.\nАдминистратор билан боғланинг."
+            )
+        except Exception:
+            pass
+
+        await query.message.reply_text("❌ Ҳайдовчи рад этилди")
+        return
+
     if data == "confirm_driver":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -1477,6 +1519,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Текширувда",
             now_text()
         ])
+                        
+        for tech_id in get_user_ids_by_role("technadzor"):
+            try:
+                await context.bot.send_message(
+                    chat_id=tech_id,
+                    text=(
+                        "🚚 Янги ҳайдовчи рўйхатдан ўтди:\n\n"
+                        f"👤 Исм: {context.user_data.get('driver_name', '')}\n"
+                        f"👤 Фамилия: {context.user_data.get('driver_surname', '')}\n"
+                        f"📞 Телефон: {context.user_data.get('phone', '')}\n"
+                        f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
+                        f"🚛 Техника: {context.user_data.get('driver_car', '')}\n\n"
+                        "Тасдиқлайсизми?"
+                    ),
+                    reply_markup=InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"approve_driver|{user_id}"),
+                            InlineKeyboardButton("❌ Рад этиш", callback_data=f"reject_driver|{user_id}")
+                        ]
+                    ])
+                )
+            except Exception:
+                pass
 
         await query.message.reply_text(
             "✅ Рўйхатдан ўтдингиз. Текширувга юборилди."
