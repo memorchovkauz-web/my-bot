@@ -881,7 +881,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🔴 <b>Исмингизни киритинг</b>\n\nМисол: Тешавой",
             parse_mode="HTML",
-            reply_markup=back_keyboard()
         )
         return
 
@@ -912,19 +911,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    if mode == "driver_phone":
+    if mode in ["driver_phone", "driver_phone_edit"]:
         phone = text.replace(" ", "").replace("+", "")
 
         if not phone.isdigit() or len(phone) != 12 or not phone.startswith("998"):
             await update.message.reply_text(
                 "❌ Телефон рақам нотўғри.\n\n"
-                "Фақат рақам киритинг ёки тугма орқали юборинг.\n"
                 "Мисол: 998939992020",
                 reply_markup=phone_keyboard()
             )
             return
 
         context.user_data["phone"] = phone
+
+        if mode == "driver_phone_edit":
+            context.user_data["mode"] = "driver_confirm"
+            await show_driver_confirm(update.message, context)
+            return
+
         context.user_data["mode"] = "driver_firm"
 
         await update.message.reply_text(
@@ -1517,7 +1521,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if field == "phone":
-            context.user_data["mode"] = "driver_phone"
+            context.user_data["mode"] = "driver_phone_edit"
             await query.message.reply_text(
                 "📞 Янги телефон рақамни юборинг:",
                 reply_markup=phone_keyboard()
