@@ -806,15 +806,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     driver_status = get_driver_status(update.effective_user.id)
 
     if role is None:
+
         if driver_status == "Текширувда":
             await update.message.reply_text("⏳ Сизнинг аризангиз текширувда.")
             return
 
-        if driver_status == "Рад этилди":
+        elif driver_status == "Рад этилди":
             await update.message.reply_text("❌ Сизнинг аризангиз рад этилган.")
             return
 
-        if driver_status == "Тасдиқланди":
+        elif driver_status == "Тасдиқланди":
             driver_car = get_driver_car(update.effective_user.id)
             fuel_type = get_car_fuel_type(driver_car)
 
@@ -826,15 +827,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        await update.message.reply_text(
-            "🚚 Ҳайдовчи сифатида рўйхатдан ўтинг:",
-            reply_markup=ReplyKeyboardMarkup(
-                [[KeyboardButton("🚚 Рўйхатдан ўтиш")]],
-                resize_keyboard=True
+        else:
+            await update.message.reply_text(
+                "🚚 Ҳайдовчи сифатида рўйхатдан ўтинг:",
+                reply_markup=ReplyKeyboardMarkup(
+                    [[KeyboardButton("🚚 Рўйхатдан ўтиш")]],
+                    resize_keyboard=True
+                )
             )
-        )
-        context.user_data["mode"] = "driver_register_start"
-        return
+            context.user_data["mode"] = "driver_register_start"
+            return
+            
     if role not in ["director", "mechanic", "technadzor", "slesar"]:
         await deny(update)
         return
