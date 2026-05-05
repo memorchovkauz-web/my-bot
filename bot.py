@@ -1826,12 +1826,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    role = get_role(update)
-
-    if role not in ["director", "mechanic", "technadzor", "slesar"]:
-        await deny(update)
-        return
-
     
     mode = context.user_data.get("mode")
 
@@ -1859,6 +1853,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=back_keyboard()
         )
+        return
+
+    role = get_role(update)
+
+    if role not in ["director", "mechanic", "technadzor", "slesar"]:
+        await deny(update)
         return
        
 
