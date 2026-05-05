@@ -1988,8 +1988,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
+
     mode = context.user_data.get("mode")
+
+    if mode == "fuel_gas_km":
+        await update.message.reply_text(
+            "❌ Бу босқичда расм қабул қилинмайди.\n\n"
+            "🔴 Спидометр кўрсаткичини рақам билан киритинг.\n"
+            "Мисол: 15300"
+        )
+        return
 
     if mode == "fuel_gas_video":
         await update.message.reply_text(
@@ -2102,8 +2110,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
+
     mode = context.user_data.get("mode")
+
+    if mode == "fuel_gas_km":
+        await update.message.reply_text(
+            "❌ Бу босқичда видео қабул қилинмайди.\n\n"
+            "🔴 Спидометр кўрсаткичини рақам билан киритинг.\n"
+            "Мисол: 15300"
+        )
+        return
 
     if mode == "fuel_gas_photo":
         await update.message.reply_text(
