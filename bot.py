@@ -444,9 +444,9 @@ def technadzor_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🔧 Ремонтга қўшиш")],
         [KeyboardButton("☑️ Ремонтдан чиқишини тасдиқлаш")],
+        [KeyboardButton("🚚 Ҳайдовчилар")],
         [KeyboardButton("📚 История")],
     ], resize_keyboard=True)
-
 
 def repair_type_keyboard():
     return ReplyKeyboardMarkup(
@@ -1841,6 +1841,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "☑️ Ремонтдан чиқишини тасдиқлаш":
             context.user_data["mode"] = "confirm_exit"
             await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
+            return
+
+        if text == "🚚 Ҳайдовчилар":
+            await update.message.reply_text(
+                "🚚 Ҳайдовчилар бўлими ҳозирча тайёрланмоқда.",
+                reply_markup=technadzor_keyboard()
+            )
             return
 
         if text == "📚 История":
