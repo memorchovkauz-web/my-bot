@@ -524,6 +524,69 @@ def cars_for_check_by_firm_group():
 
     return InlineKeyboardMarkup(keyboard)
 
+def db_execute(query, params=None):
+    global conn, cursor
+
+    try:
+        cursor.execute(query, params or ())
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+        conn = psycopg2.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        cursor.execute(query, params or ())
+        conn.commit()
+
+
+def save_repair_to_db(
+    car,
+    km,
+    repair_type,
+    status,
+    note,
+    video_id,
+    photo_id,
+    person,
+    start_time,
+    end_time,
+    duration,
+    executor_id
+):
+    db_execute("""
+        CREATE TABLE IF NOT EXISTS repairs (
+            id SERIAL PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT NOW(),
+            car TEXT,
+            km TEXT,
+            repair_type TEXT,
+            status TEXT,
+            note TEXT,
+            video_id TEXT,
+            photo_id TEXT,
+            person TEXT,
+            start_time TEXT,
+            end_time TEXT,
+            duration TEXT,
+            executor_id BIGINT
+        )
+    """)
+
+    db_execute("""
+        INSERT INTO repairs (
+            car, km, repair_type, status, note,
+            video_id, photo_id, person,
+            start_time, end_time, duration, executor_id
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        car, km, repair_type, status, note,
+        video_id, photo_id, person,
+        start_time, end_time, duration, executor_id
+    ))
 
 def update_car_status(car, status):
     rows = mashina_ws.get_all_values()
@@ -951,6 +1014,21 @@ async def save_final_data(update_or_query, context, message_obj):
         repair_duration,     # M
         executor_id          # N
   ])
+
+  save_repair_to_db(
+        car=car,
+        km=km,
+        repair_type=amal,
+        status=status,
+        note=note,
+        video_id=video_id,
+        photo_id=km_photo_id,
+        person=added_by,
+        start_time=repair_start_time,
+        end_time=repair_end_time,
+        duration=repair_duration,
+        executor_id=executor_id
+  )
 
     if operation == "remove":
         await notify_technadzor_for_check(context, car)
