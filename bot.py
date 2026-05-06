@@ -151,8 +151,8 @@ def sync_repairs_to_db():
     conn.commit()
 
 
-sync_repairs_to_db()
-print("REPAIRS SYNCED")
+# sync_repairs_to_db()
+# print("REPAIRS SYNCED")
 
 def save_new_repair_to_db(
     car_number,
