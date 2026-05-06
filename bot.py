@@ -1800,6 +1800,55 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if mode == "gasgive_firm":
+        if text == "⬅️ Орқага":
+            context.user_data.clear()
+            await update.message.reply_text(
+                "⛽ Ёқилғи ҳисоботи бўлими\n\nАмални танланг:",
+                reply_markup=gas_report_keyboard()
+            )
+            return
+
+        context.user_data["gasgive_firm"] = text
+        context.user_data["mode"] = "gasgive_car"
+
+        await update.message.reply_text(
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=back_keyboard()
+        )
+
+        await update.message.reply_text(
+            "🚛 Қайси газли техникага ГАЗ беряпсиз?",
+            reply_markup=gas_cars_by_firm_keyboard(text)
+        )
+        return
+
+    if mode == "gasgive_note":
+        if not is_valid_gas_note(text):
+            await update.message.reply_text(
+                "❌ Изоҳ фақат ҳарф ва рақамдан иборат бўлиши керак.\n\n"
+                "🔴 Нега ГАЗ беряпсиз? Изоҳ ёзинг."
+            )
+            return
+
+        context.user_data["gasgive_note"] = text
+        context.user_data["mode"] = "gasgive_video"
+
+        await update.message.reply_text(
+            "🎥 Бошқарувингиздаги техника ва ГАЗ оладиган техника номерлари билан "
+            "газ бериш жараёнини видео қилиб ташланг.\n\n"
+            "⏱ Видео 10 сониядан кам бўлмасин.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if mode == "gasgive_video":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат видео қабул қилинади.\n\n"
+            "🎥 10 сониядан кам бўлмаган видео юборинг."
+        )
+        return
+
     if text == "⬅️ Орқага":
         if mode == "driver_car":
             context.user_data["mode"] = "driver_firm"
