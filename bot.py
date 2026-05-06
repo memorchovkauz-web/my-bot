@@ -103,8 +103,10 @@ def sync_cars_to_db():
 
     for row in cars:
         try:
+            firm = row[0].strip() if len(row) > 0 else ""
             car_number = row[1].strip() if len(row) > 1 else ""
             car_type = row[2].strip() if len(row) > 2 else ""
+            status = row[6].strip() if len(row) > 6 else ""
             fuel_type = row[7].strip() if len(row) > 7 else ""
 
             if not car_number:
@@ -112,19 +114,25 @@ def sync_cars_to_db():
 
             cursor.execute("""
                 INSERT INTO cars (
+                    firm,
                     car_number,
                     car_type,
                     fuel_type,
                     status
                 )
-                VALUES (%s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (car_number)
-                DO NOTHING
+                DO UPDATE SET
+                    firm = EXCLUDED.firm,
+                    car_type = EXCLUDED.car_type,
+                    fuel_type = EXCLUDED.fuel_type,
+                    status = EXCLUDED.status
             """, (
+                firm,
                 car_number,
                 car_type,
                 fuel_type,
-                "ready"
+                status
             ))
 
         except Exception as e:
@@ -375,23 +383,24 @@ def edit_keyboard_remove():
 
 def get_all_cars():
     cursor.execute("""
-        SELECT car_number, car_type, fuel_type, status
+        SELECT firm, car_number, car_type, status, fuel_type
         FROM cars
-        ORDER BY car_number
+        ORDER BY firm, car_number
     """)
-    
-    rows = cursor.fetchall()
 
+    rows = cursor.fetchall()
     result = []
 
     for row in rows:
         result.append([
-            "",                 # index 0
-            row[0],             # car_number
-            row[1],             # car_type
-            "", "", "", "",     # empty columns
-            row[2],             # fuel_type
-            row[3]              # status
+            row[0] or "",   # 0 firm
+            row[1] or "",   # 1 car_number
+            row[2] or "",   # 2 car_type
+            "",             # 3
+            "",             # 4
+            "",             # 5
+            row[3] or "",   # 6 status
+            row[4] or ""    # 7 fuel_type
         ])
 
     return result
