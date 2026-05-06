@@ -539,14 +539,15 @@ def gas_firm_keyboard():
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 
-def gas_cars_by_firm_keyboard(firm):
+def gas_cars_by_firm_keyboard(firm, exclude_car=None):
     cursor.execute("""
         SELECT car_number, car_type
         FROM cars
         WHERE LOWER(firm) = LOWER(%s)
           AND LOWER(fuel_type) = LOWER('Газ')
+          AND (%s IS NULL OR LOWER(car_number) <> LOWER(%s))
         ORDER BY car_number
-    """, (firm,))
+    """, (firm, exclude_car, exclude_car))
 
     rows = cursor.fetchall()
     keyboard = []
@@ -1516,7 +1517,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             firm = context.user_data.get("gasgive_firm")
             await update.message.reply_text(
                 "🚛 Қайси газли техникага ГАЗ беряпсиз?",
-                reply_markup=gas_cars_by_firm_keyboard(firm)
+                reply_markup=gas_cars_by_firm_keyboard(
+                    firm,
+                    context.user_data.get("gasgive_from_car")
+                )
             )
             return
 
@@ -1908,7 +1912,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "🚛 Қайси газли техникага ГАЗ беряпсиз?",
-            reply_markup=gas_cars_by_firm_keyboard(text)
+            reply_markup=gas_cars_by_firm_keyboard(
+                text,
+                context.user_data.get("gasgive_from_car")
+            )
         )
         return
 
@@ -2282,6 +2289,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if query.data == "none":
+        return
+
+    if data.startswith("gasgive_car|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        car = data.split("|", 1)[1]
+
+        context.user_data["gasgive_to_car"] = car
+        context.user_data["mode"] = "gasgive_note"
+
+        await query.message.reply_text(
+            f"🚛 ГАЗ оладиган техника: {car}\n\n"
+            "🔴 Нега ГАЗ беряпсиз? Изоҳ ёзинг!\n\n"
+            "Фақат ҳарф ва рақам ёзиш мумкин.",
+            reply_markup=back_keyboard()
+        )
         return
 
     if data.startswith("approve_driver|"):
