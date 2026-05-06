@@ -1481,6 +1481,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
+    if text == "⬅️ Орқага" and mode in ["fuel_menu", "gasgive_firm", "gasgive_car", "gasgive_note", "gasgive_video", "gasgive_confirm"]:
+        driver_car = get_driver_car(update.effective_user.id)
+        fuel_type = get_car_fuel_type(driver_car)
+
+        if mode == "fuel_menu":
+            context.user_data.clear()
+            await update.message.reply_text(
+                f"🚚 Ҳайдовчи менюси\n\n"
+                f"🚛 Техника: {driver_car}\n"
+                f"⛽ Ёқилғи тури: {fuel_type}",
+                reply_markup=driver_main_keyboard(fuel_type)
+            )
+            return
+
+        if mode == "gasgive_firm":
+            context.user_data["mode"] = "fuel_menu"
+            await update.message.reply_text(
+                "⛽ Ёқилғи ҳисоботи бўлими\n\nАмални танланг:",
+                reply_markup=gas_report_keyboard()
+            )
+            return
+
+        if mode == "gasgive_car":
+            context.user_data["mode"] = "gasgive_firm"
+            await update.message.reply_text(
+                "🏢 Қайси фирмадаги газли техникага ГАЗ беряпсиз?",
+                reply_markup=gas_firm_keyboard()
+            )
+            return
+
+        if mode in ["gasgive_note", "gasgive_video", "gasgive_confirm"]:
+            context.user_data["mode"] = "gasgive_car"
+            firm = context.user_data.get("gasgive_firm")
+            await update.message.reply_text(
+                "🚛 Қайси газли техникага ГАЗ беряпсиз?",
+                reply_markup=gas_cars_by_firm_keyboard(firm)
+            )
+            return
+
     if mode == "fuel_gas_video":
         await update.message.reply_text(
             "❌ Бу босқичда матн қабул қилинмайди.\n\n"
