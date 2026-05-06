@@ -2325,4 +2325,7 @@ app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-app.run_polling()
+app.run_polling(
+    drop_pending_updates=True,
+    close_loop=False
+)
