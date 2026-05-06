@@ -1024,7 +1024,7 @@ async def send_history_by_date(message, car, start_date, end_date):
             except:
                 continue
 
-        if sana.date() < start_date or sana.date() > end_date:
+        if sana.date() < start_date.date() or sana.date() > end_date.date():
             continue
 
         km = row[1] or ""
