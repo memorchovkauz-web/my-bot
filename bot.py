@@ -630,7 +630,7 @@ def history_car_buttons_by_firm(firm):
 
         keyboard.append([
             InlineKeyboardButton(
-                f"{car_number} | {car_type} | Ремонт: {car_stat['total']} | Тасдиқланган: {car_stat['approved']}",
+                f"{car_number} | {car_type} | Р:{car_stat['total']} | Т:{car_stat['approved']}",
                 callback_data=f"car|{car_number}"
             )
         ])
@@ -1036,6 +1036,14 @@ async def send_history_by_date(message, car, start_date, end_date):
         approved_at = row[13]
 
         event_date = entered_at or exited_at or approved_at
+
+        if len(row) < 14:
+            continue
+
+        status = row[5].strip().lower()
+
+        if status == "соз" and row[13].strip().lower() != "tasdiqlandi":
+            continue
 
         if not event_date:
             continue
