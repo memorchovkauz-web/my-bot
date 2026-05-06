@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import threading
 import psycopg2
 from datetime import datetime, timedelta
@@ -67,6 +68,23 @@ CREATE TABLE IF NOT EXISTS fuel_reports (
     video_id TEXT,
     photo_id TEXT,
     created_at TIMESTAMP DEFAULT NOW()
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS gas_transfers (
+    id BIGSERIAL PRIMARY KEY,
+    from_driver_id BIGINT,
+    from_car TEXT,
+    to_driver_id BIGINT,
+    to_car TEXT,
+    firm TEXT,
+    note TEXT,
+    video_id TEXT,
+    status TEXT DEFAULT 'Текширувда',
+    receiver_comment TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    answered_at TIMESTAMP
 )
 """)
 
@@ -495,6 +513,97 @@ def driver_main_keyboard(fuel_type=""):
         buttons.insert(1, [KeyboardButton("🟡 Дизел лимит маълумоти")])
 
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+
+def gas_report_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("⛽ ГАЗ олиш")],
+        [KeyboardButton("⛽ ГАЗ бериш")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
+def gas_firm_keyboard():
+    cursor.execute("""
+        SELECT DISTINCT firm
+        FROM cars
+        WHERE LOWER(fuel_type) = LOWER('Газ')
+          AND firm IS NOT NULL
+          AND firm <> ''
+        ORDER BY firm
+    """)
+    rows = cursor.fetchall()
+
+    buttons = [[KeyboardButton(row[0])] for row in rows]
+    buttons.append([KeyboardButton("⬅️ Орқага")])
+
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+
+
+def gas_cars_by_firm_keyboard(firm):
+    cursor.execute("""
+        SELECT car_number, car_type
+        FROM cars
+        WHERE LOWER(firm) = LOWER(%s)
+          AND LOWER(fuel_type) = LOWER('Газ')
+        ORDER BY car_number
+    """, (firm,))
+
+    rows = cursor.fetchall()
+    keyboard = []
+
+    for car_number, car_type in rows:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{car_number} | {car_type}",
+                callback_data=f"gasgive_car|{car_number}"
+            )
+        ])
+
+    if not keyboard:
+        keyboard = [[InlineKeyboardButton("❌ Газли техника топилмади", callback_data="none")]]
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+def gas_give_confirm_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data="gasgive_confirm"),
+            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="gasgive_edit")
+        ]
+    ])
+
+
+def gas_give_edit_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📝 Изоҳ", callback_data="gasgive_edit_note")],
+        [InlineKeyboardButton("🎥 Видео", callback_data="gasgive_edit_video")]
+    ])
+
+
+def gas_receiver_confirm_keyboard(transfer_id):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"gasgive_accept|{transfer_id}"),
+            InlineKeyboardButton("❌ Рад этиш", callback_data=f"gasgive_reject|{transfer_id}")
+        ]
+    ])
+
+
+def is_valid_gas_note(text):
+    return bool(re.match(r"^[A-Za-zА-Яа-яЁёЎўҚқҒғҲҳ0-9\s]+$", text.strip())) and len(text.strip()) >= 2
+
+
+def get_driver_by_car(car):
+    cursor.execute("""
+        SELECT telegram_id, name, surname
+        FROM drivers
+        WHERE LOWER(car) = LOWER(%s)
+          AND status = 'Тасдиқланди'
+        LIMIT 1
+    """, (car,))
+
+    return cursor.fetchone()
 
 def push_state(context, new_mode):
     if "history" not in context.user_data:
@@ -1387,11 +1496,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "⛽ Ёқилғи ҳисоботи":
+        await update.message.reply_text(
+            "⛽ Ёқилғи ҳисоботи бўлими\n\nАмални танланг:",
+            reply_markup=gas_report_keyboard()
+        )
+        return
+
+    if text == "⛽ ГАЗ олиш":
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
 
         if fuel_type.lower() != "газ":
-            await update.message.reply_text("Бу бўлим ҳозирча фақат газлик техникалар учун.")
+            await update.message.reply_text("Бу бўлим фақат газли техникалар учун.")
             return
 
         context.user_data["mode"] = "fuel_gas_km"
@@ -1403,6 +1519,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🔴 Спидометр кўрсаткичини киритинг (КМ)\n\n"
             "Мисол: 15300",
             reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if text == "⛽ ГАЗ бериш":
+        driver_car = get_driver_car(update.effective_user.id)
+        fuel_type = get_car_fuel_type(driver_car)
+
+        if fuel_type.lower() != "газ":
+            await update.message.reply_text("ГАЗ бериш фақат газли техника ҳайдовчилари учун.")
+            return
+
+        context.user_data["mode"] = "gasgive_firm"
+        context.user_data["gasgive_from_car"] = driver_car
+
+        await update.message.reply_text(
+            "🏢 Қайси фирмадаги газли техникага ГАЗ беряпсиз?",
+            reply_markup=gas_firm_keyboard()
         )
         return
 
