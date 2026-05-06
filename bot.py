@@ -2370,7 +2370,11 @@ app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+print("BOT STARTED")
+
 app.run_polling(
     drop_pending_updates=True,
-    close_loop=False
+    allowed_updates=Update.ALL_TYPES,
+    timeout=30,
+    bootstrap_retries=5
 )
