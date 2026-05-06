@@ -154,6 +154,49 @@ def sync_repairs_to_db():
 sync_repairs_to_db()
 print("REPAIRS SYNCED")
 
+def save_new_repair_to_db(
+    car_number,
+    km,
+    repair_type,
+    status,
+    comment,
+    video_id,
+    photo_id,
+    person,
+    entered_at,
+    exited_at
+):
+    cursor.execute("""
+        INSERT INTO repairs (
+            car_number,
+            km,
+            repair_type,
+            status,
+            comment,
+            enter_video,
+            enter_photo,
+            entered_by,
+            exited_by,
+            entered_at,
+            exited_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NULLIF(%s, '')::timestamp, NULLIF(%s, '')::timestamp)
+    """, (
+        car_number,
+        km,
+        repair_type,
+        status,
+        comment,
+        video_id,
+        photo_id,
+        person,
+        person,
+        entered_at,
+        exited_at
+    ))
+
+    conn.commit()
+
 mashina_ws = sheet.worksheet("MASHINALAR")
 
 def sync_cars_to_db():
@@ -1194,6 +1237,19 @@ async def save_final_data(update_or_query, context, message_obj):
         repair_duration,     # M
         executor_id          # N
     ])
+
+        save_new_repair_to_db(
+        car_number=car,
+        km=km,
+        repair_type=amal,
+        status=status,
+        comment=note,
+        video_id=video_id,
+        photo_id=km_photo_id,
+        person=added_by,
+        entered_at=repair_start_time,
+        exited_at=repair_end_time
+    )
 
     save_repair_to_db(
         car=car,
