@@ -345,7 +345,7 @@ STATUS_ORDER = {
 
 
 def now_text():
-    return datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%d.%m.%Y %H:%M:%S")
 
 
 def is_valid_km(value):
@@ -607,9 +607,21 @@ def get_driver_by_car(car):
 
     return cursor.fetchone()
 
+def short_driver_name(row):
+    if not row:
+        return ""
+
+    name = row[1] or ""
+    surname = row[2] or ""
+
+    if name:
+        return f"{surname} {name[0]}."
+
+    return surname
+
 async def send_gas_transfer_to_receiver(context, transfer_id):
     cursor.execute("""
-        SELECT from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id
+        SELECT from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id, created_at
         FROM gas_transfers
         WHERE id = %s
     """, (transfer_id,))
@@ -618,17 +630,24 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
     if not row:
         return
 
-    from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id = row
+    from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id, created_at = row
 
+    from_driver = get_driver_by_car(from_car)
+    to_driver = get_driver_by_car(to_car)
+
+    from_driver_name = short_driver_name(from_driver)
+    to_driver_name = short_driver_name(to_driver)
+    
     await context.bot.send_message(
         chat_id=int(to_driver_id),
         text=(
             "⛽ Сизга ГАЗ бериш маълумоти келди\n\n"
-            f"🚛 Газ берувчи техника: {from_car}\n"
-            f"🚛 Газ олувчи техника: {to_car}\n"
+            f"🕒 Вақт: {created_at}\n"
             f"🏢 Фирма: {firm}\n"
+            f"🚛 Газ берувчи: {from_car} — {from_driver_name}\n"
+            f"🚛 Газ олувчи: {to_car} — {to_driver_name}\n"
             f"📝 Изоҳ: {note}\n\n"
-            "Тасдиқлайсизми?"
+"Тасдиқлайсизми?"
         ),
         reply_markup=gas_receiver_confirm_keyboard(transfer_id)
     )
@@ -687,6 +706,18 @@ async def auto_confirm_gas_transfer(context, user_id):
 
     transfer_id = cursor.fetchone()[0]
     conn.commit()
+
+    confirm_message_id = context.user_data.get("gasgive_confirm_message_id")
+
+    if confirm_message_id:
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=user_id,
+                message_id=confirm_message_id,
+                reply_markup=None
+            )
+        except Exception:
+            pass
 
     await context.bot.send_message(
         chat_id=user_id,
@@ -3196,15 +3227,26 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from_car = context.user_data.get("gasgive_from_car")
         to_car = context.user_data.get("gasgive_to_car")
         note = context.user_data.get("gasgive_note")
+        created_time = now_text()
 
-        await update.message.reply_text(
+        from_driver = get_driver_by_car(from_car)
+        to_driver = get_driver_by_car(to_car)
+
+        context.user_data["gasgive_created_time"] = created_time
+        context.user_data["gasgive_from_driver_name"] = short_driver_name(from_driver)
+        context.user_data["gasgive_to_driver_name"] = short_driver_name(to_driver)
+
+        sent_msg = await update.message.reply_text(
             "✅ МАЪЛУМОТЛАР\n\n"
-            f"🚛 ГАЗ берувчи: {from_car}\n"
-            f"⛽ ГАЗ олувчи: {to_car}\n"
+            f"🕒 Вақт: {created_time}\n"
+            f"🚛 ГАЗ берувчи: {from_car} — {context.user_data.get('gasgive_from_driver_name')}\n"
+            f"⛽ ГАЗ олувчи: {to_car} — {context.user_data.get('gasgive_to_driver_name')}\n"
             f"📝 Изоҳ: {note}\n\n"
             "Тасдиқлайсизми?",
             reply_markup=gas_give_confirm_keyboard()
         )
+
+        context.user_data["gasgive_confirm_message_id"] = sent_msg.message_id
 
         await update.message.reply_video_note(
             video_note=update.message.video_note.file_id
