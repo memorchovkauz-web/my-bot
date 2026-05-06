@@ -1238,7 +1238,7 @@ async def save_final_data(update_or_query, context, message_obj):
         executor_id          # N
     ])
 
-        save_new_repair_to_db(
+    save_new_repair_to_db(
         car_number=car,
         km=km,
         repair_type=amal,
