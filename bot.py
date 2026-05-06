@@ -2,6 +2,7 @@ import os
 import json
 import re
 import threading
+import asyncio
 import psycopg2
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -605,6 +606,124 @@ def get_driver_by_car(car):
     """, (car,))
 
     return cursor.fetchone()
+
+async def send_gas_transfer_to_receiver(context, transfer_id):
+    cursor.execute("""
+        SELECT from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id
+        FROM gas_transfers
+        WHERE id = %s
+    """, (transfer_id,))
+
+    row = cursor.fetchone()
+    if not row:
+        return
+
+    from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id = row
+
+    await context.bot.send_message(
+        chat_id=int(to_driver_id),
+        text=(
+            "⛽ Сизга ГАЗ бериш маълумоти келди\n\n"
+            f"🚛 Газ берувчи техника: {from_car}\n"
+            f"🚛 Газ олувчи техника: {to_car}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"📝 Изоҳ: {note}\n\n"
+            "Тасдиқлайсизми?"
+        ),
+        reply_markup=gas_receiver_confirm_keyboard(transfer_id)
+    )
+
+    if video_id:
+        await safe_send_video(context.bot, int(to_driver_id), video_id)
+
+    asyncio.create_task(auto_accept_gas_transfer(context, transfer_id))
+
+
+async def auto_confirm_gas_transfer(context, user_id):
+    if context.user_data.get("mode") != "gasgive_confirm":
+        return
+
+    from_car = context.user_data.get("gasgive_from_car")
+    to_car = context.user_data.get("gasgive_to_car")
+    firm = context.user_data.get("gasgive_firm")
+    note = context.user_data.get("gasgive_note")
+    video_id = context.user_data.get("gasgive_video_id")
+
+    receiver = get_driver_by_car(to_car)
+    if not receiver:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="❌ Газ оладиган техника ҳайдовчиси топилмади."
+        )
+        return
+
+    to_driver_id = receiver[0]
+
+    cursor.execute("""
+        INSERT INTO gas_transfers (
+            from_driver_id,
+            from_car,
+            to_driver_id,
+            to_car,
+            firm,
+            note,
+            video_id,
+            status
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """, (
+        user_id,
+        from_car,
+        to_driver_id,
+        to_car,
+        firm,
+        note,
+        video_id,
+        "Қабул қилувчи текширувида"
+    ))
+
+    transfer_id = cursor.fetchone()[0]
+    conn.commit()
+
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="✅ Маълумот автоматик тасдиқланди ва газ олувчи ҳайдовчига юборилди."
+    )
+
+    await send_gas_transfer_to_receiver(context, transfer_id)
+
+
+async def auto_accept_gas_transfer(context, transfer_id):
+    await asyncio.sleep(21600)  # 6 соат
+
+    cursor.execute("""
+        SELECT status, from_driver_id, to_car
+        FROM gas_transfers
+        WHERE id = %s
+    """, (transfer_id,))
+
+    row = cursor.fetchone()
+    if not row:
+        return
+
+    status, from_driver_id, to_car = row
+
+    if status != "Қабул қилувчи текширувида":
+        return
+
+    cursor.execute("""
+        UPDATE gas_transfers
+        SET status = %s, answered_at = NOW()
+        WHERE id = %s
+    """, ("Автоматик тасдиқланди", transfer_id))
+
+    conn.commit()
+
+    await context.bot.send_message(
+        chat_id=int(from_driver_id),
+        text=f"✅ Газ бериш маълумотингиз автоматик тасдиқланди.\n🚛 Техника: {to_car}"
+    )
 
 def push_state(context, new_mode):
     if "history" not in context.user_data:
@@ -2306,6 +2425,154 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "none":
         return
 
+    if data == "gasgive_confirm":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        from_car = context.user_data.get("gasgive_from_car")
+        to_car = context.user_data.get("gasgive_to_car")
+        firm = context.user_data.get("gasgive_firm")
+        note = context.user_data.get("gasgive_note")
+        video_id = context.user_data.get("gasgive_video_id")
+        user_id = update.effective_user.id
+
+        receiver = get_driver_by_car(to_car)
+        if not receiver:
+            await query.message.reply_text("❌ Газ оладиган техника ҳайдовчиси топилмади.")
+            return
+
+        to_driver_id = receiver[0]
+
+        cursor.execute("""
+            INSERT INTO gas_transfers (
+                from_driver_id,
+                from_car,
+                to_driver_id,
+                to_car,
+                firm,
+                note,
+                video_id,
+                status
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            user_id,
+            from_car,
+            to_driver_id,
+            to_car,
+            firm,
+            note,
+            video_id,
+            "Қабул қилувчи текширувида"
+        ))
+
+        transfer_id = cursor.fetchone()[0]
+        conn.commit()
+
+        await query.message.reply_text("✅ Маълумот газ олувчи ҳайдовчига юборилди.")
+
+        await send_gas_transfer_to_receiver(context, transfer_id)
+
+        context.user_data.clear()
+        return
+
+    if data == "gasgive_edit":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await query.message.reply_text(
+            "✏️ Қайси маълумотни таҳрирлайсиз?",
+            reply_markup=gas_give_edit_keyboard()
+        )
+        return
+
+    if data == "gasgive_edit_note":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "gasgive_note"
+
+        await query.message.reply_text(
+            "🔴 Янги изоҳни киритинг.\n\nФақат ҳарф ва рақам ёзиш мумкин."
+        )
+        return
+
+    if data == "gasgive_edit_video":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "gasgive_video"
+
+        await query.message.reply_text(
+            "🎥 Янги думалоқ видео юборинг.\n\n⏱ Видео 10 сониядан кам бўлмасин."
+        )
+        return
+
+    if data.startswith("gasgive_accept|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            UPDATE gas_transfers
+            SET status = %s, answered_at = NOW()
+            WHERE id = %s
+            RETURNING from_driver_id, to_car
+        """, ("Тасдиқланди", transfer_id))
+
+        row = cursor.fetchone()
+        conn.commit()
+
+        if row:
+            from_driver_id, to_car = row
+            await context.bot.send_message(
+                chat_id=int(from_driver_id),
+                text=f"✅ Газ бериш маълумотингиз тасдиқланди.\n🚛 Техника: {to_car}"
+            )
+
+        await query.message.reply_text("✅ Маълумот тасдиқланди.")
+        return
+
+    if data.startswith("gasgive_reject|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            UPDATE gas_transfers
+            SET status = %s, answered_at = NOW()
+            WHERE id = %s
+            RETURNING from_driver_id, to_car
+        """, ("Рад этилди", transfer_id))
+
+        row = cursor.fetchone()
+        conn.commit()
+
+        if row:
+            from_driver_id, to_car = row
+            await context.bot.send_message(
+                chat_id=int(from_driver_id),
+                text=f"❌ Газ бериш маълумотингиз рад этилди.\n🚛 Техника: {to_car}"
+            )
+
+        await query.message.reply_text("❌ Маълумот рад этилди.")
+        return
+
     if data.startswith("gasgive_car|"):
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -2944,14 +3211,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 video_note=update.message.video_note.file_id
             )
 
-            context.job_queue.run_once(
-                auto_confirm_gas_transfer,
-                when=15,
-                data={
-                    "chat_id": update.effective_chat.id,
-                    "user_id": update.effective_user.id
-                },
-                name=f"gasgive_{update.effective_user.id}"
+            asyncio.create_task(
+                auto_confirm_gas_transfer(context, update.effective_user.id)
             )
 
             return
