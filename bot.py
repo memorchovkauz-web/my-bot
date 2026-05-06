@@ -2368,7 +2368,6 @@ app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-print("BOT STARTED")
 
 print("BOT STARTED WEBHOOK")
 
