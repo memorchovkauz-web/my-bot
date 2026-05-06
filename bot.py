@@ -1505,6 +1505,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        context.user_data["mode"] = "fuel_menu"
+
         await update.message.reply_text(
             "⛽ Ёқилғи ҳисоботи бўлими\n\nАмални танланг:",
             reply_markup=gas_report_keyboard()
@@ -1811,6 +1813,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode == "gasgive_firm":
         if text == "⬅️ Орқага":
+            if mode == "fuel_menu":
+                context.user_data.clear()
+
+                driver_car = get_driver_car(update.effective_user.id)
+                fuel_type = get_car_fuel_type(driver_car)
+
+                await update.message.reply_text(
+                    f"🚚 Ҳайдовчи менюси\n\n"
+                    f"🚛 Техника: {driver_car}\n"
+                    f"⛽ Ёқилғи тури: {fuel_type}",
+                    reply_markup=driver_main_keyboard(fuel_type)
+                )
+                return
             if mode == "gasgive_firm":
                 context.user_data.clear()
                 await update.message.reply_text(
