@@ -596,25 +596,44 @@ def get_repair_stats(car):
     return kirgan, chiqqan
 
 def history_car_buttons_by_firm(firm):
+    cursor.execute("""
+        SELECT car_number, car_type
+        FROM cars
+        WHERE LOWER(firm) = LOWER(%s)
+        ORDER BY car_number
+    """, (firm,))
+
+    cars = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT
+            car_number,
+            SUM(CASE WHEN status = 'Носоз' THEN 1 ELSE 0 END) AS kirgan,
+            SUM(CASE WHEN status IN ('Текширувда', 'Соз') THEN 1 ELSE 0 END) AS chiqqan
+        FROM repairs
+        GROUP BY car_number
+    """)
+
+    stats_rows = cursor.fetchall()
+
+    stats = {}
+    for row in stats_rows:
+        stats[row[0]] = {
+            "kirgan": row[1] or 0,
+            "chiqqan": row[2] or 0
+        }
+
     keyboard = []
 
-    for row in get_all_cars():
-        if len(row) < 7:
-            continue
+    for car_number, car_type in cars:
+        car_stat = stats.get(car_number, {"kirgan": 0, "chiqqan": 0})
 
-        firm_name = row[0].strip()
-        car = row[1].strip()
-        turi = row[2].strip()
-
-        if firm_name.lower() == firm.strip().lower():
-            kirgan, chiqqan = get_repair_stats(car)
-
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"{car} | {turi} | {kirgan} / {chiqqan}",
-                    callback_data=f"car|{car}"
-                )
-            ])
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{car_number} | {car_type} | {car_stat['kirgan']} / {car_stat['chiqqan']}",
+                callback_data=f"car|{car_number}"
+            )
+        ])
 
     if not keyboard:
         keyboard = [[InlineKeyboardButton("❌ Техника топилмади", callback_data="none")]]
