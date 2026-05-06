@@ -2358,8 +2358,6 @@ def run_server():
     server.serve_forever()
 
 
-threading.Thread(target=run_server, daemon=True).start()
-
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
@@ -2372,9 +2370,13 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 print("BOT STARTED")
 
-app.run_polling(
+print("BOT STARTED WEBHOOK")
+
+app.run_webhook(
+    listen="0.0.0.0",
+    port=int(os.environ.get("PORT", 10000)),
+    url_path=TOKEN,
+    webhook_url=f"https://telegram-bot-r9k8.onrender.com/{TOKEN}",
     drop_pending_updates=True,
     allowed_updates=Update.ALL_TYPES,
-    timeout=30,
-    bootstrap_retries=5
 )
