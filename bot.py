@@ -990,103 +990,90 @@ async def send_last_repairs(query, car, repair_type):
 
 
 async def send_history_by_date(message, car, start_date, end_date):
-    rows = remont_ws.get_all_values()[1:]
     car_type = get_car_type(car)
     text_result = []
 
+    cursor.execute("""
+        SELECT
+            entered_at,
+            km,
+            repair_type,
+            status,
+            comment,
+            enter_video,
+            enter_photo,
+            entered_by,
+            exited_at,
+            exited_by
+        FROM repairs
+        WHERE LOWER(car_number) = LOWER(%s)
+        ORDER BY entered_at DESC
+    """, (car,))
+
+    rows = cursor.fetchall()
+
     for row in rows:
-        if len(row) < 13:
+        sana = row[0]
+
+        if not sana:
             continue
 
-        if row[2].strip().lower() != car.strip().lower():
+        if isinstance(sana, str):
+            try:
+                sana = datetime.strptime(sana, "%Y-%m-%d %H:%M:%S")
+            except:
+                continue
+
+        if sana.date() < start_date or sana.date() > end_date:
             continue
 
-        sana_text = row[1].strip()
+        km = row[1] or ""
+        repair_type = row[2] or ""
+        status = row[3] or ""
+        comment = row[4] or ""
+        video_id = row[5] or ""
+        photo_id = row[6] or ""
+        entered_by = row[7] or ""
+        exited_at = row[8]
+        exited_by = row[9] or ""
 
-        try:
-            sana = datetime.strptime(sana_text, "%Y-%m-%d %H:%M:%S")
-        except Exception:
-            continue
-
-        if not (start_date.replace(tzinfo=None) <= sana <= end_date.replace(tzinfo=None)):
-            continue
-
-        km = row[3] if len(row) > 3 else ""
-        repair_type = row[4] if len(row) > 4 else ""
-        status = row[5] if len(row) > 5 else ""
-        note = clean_note(row[6] if len(row) > 6 else "")
-        video_id = row[7] if len(row) > 7 else ""
-        person = row[9] if len(row) > 9 else ""
-        start_time = row[10] if len(row) > 10 else ""
-        end_time = row[11] if len(row) > 11 else ""
-        duration = row[12] if len(row) > 12 else ""
-
-        if status == "Носоз":
-            block = (
-                f"🚛 Техника: {car}\n"
-                f"🚜 Тури: {car_type}\n\n"
-                f"🔴 РЕМОНТГА КИРДИ\n"
-                f"📅 Сана ва вақт: {start_time or sana_text}\n"
-                f"⏱ КМ/Моточас: {km}\n"
-                f"🔧 Ремонт тури: {repair_type}\n"
-                f"📝 Изоҳ: {note}\n"
-                f"🎥 Видео: сақланган ✅\n"
-                f"👤 Ремонтга киритган шахс: {person}"
-            )
-        elif status == "Текширувда":
-            block = (
-                f"🚛 Техника: {car}\n"
-                f"🚜 Тури: {car_type}\n\n"
-                f"🟡 РЕМОНТДАН ЧИҚДИ\n"
-                f"📅 Сана ва вақт: {end_time or sana_text}\n"
-                f"📝 Изоҳ: {note}\n"
-                f"🎥 Видео: сақланган ✅\n"
-                f"⏳ Ремонтга кетган вақт: {duration}\n"
-                f"👤 Ремонтдан чиқарган шахс: {person}"
-            )
-        elif status == "Соз" and "тасдиқ" in repair_type.lower():
-            block = (
-                f"🚛 Техника: {car}\n"
-                f"🚜 Тури: {car_type}\n\n"
-                f"✅ ТАСДИҚЛАНДИ\n"
-                f"📅 Сана ва вақт: {sana_text}\n"
-                f"👤 Технодзор: {person}"
-            )
-        else:
-            block = (
-                f"🚛 Техника: {car}\n"
-                f"🚜 Тури: {car_type}\n\n"
-                f"📌 Ҳолат: {status}\n"
-                f"📅 Сана ва вақт: {sana_text}\n"
-                f"🔧 Амал: {repair_type}\n"
-                f"📝 Изоҳ: {note}\n"
-                f"👤 Шахс: {person}"
-            )
-
-        sort_time = start_time or end_time or sana_text
-        photo_id = row[8] if len(row) > 8 else ""
-        text_result.append((sort_time, block, video_id, photo_id))
-
-    if not text_result:
-        await message.reply_text(
-            "Бу вақт оралиғида ремонт историяси топилмади.\n\nБошқа даврни танланг:",
-            reply_markup=history_period_keyboard()
+        text = (
+            f"🚘 {car}\n"
+            f"🔧 Тури: {car_type}\n"
+            f"📅 Сана: {sana.strftime('%Y-%m-%d %H:%M')}\n"
+            f"📟 KM/Моточас: {km}\n"
+            f"🛠 Ремонт: {repair_type}\n"
+            f"📌 Статус: {status}\n"
+            f"💬 Изоҳ: {comment}\n"
+            f"👨‍🔧 Киритган: {entered_by}\n"
         )
-        return
 
-    text_result.sort(key=lambda x: x[0])
+        if exited_at:
+            text += f"✅ Чиқган сана: {exited_at}\n"
 
-    await message.reply_text("📚 Техника историяси:")
+        if exited_by:
+            text += f"👤 Чиқарган: {exited_by}\n"
 
-    for _, block, video_id, photo_id in text_result[-20:]:
-        await message.reply_text(block)
+        text_result.append(text)
 
         if photo_id:
-            await safe_send_photo(message.get_bot(), message.chat_id, photo_id)
+            try:
+                await message.reply_photo(photo_id)
+            except:
+                pass
 
         if video_id:
-            await safe_send_video(message.get_bot(), message.chat_id, video_id)
+            try:
+                await message.reply_video(video_id)
+            except:
+                pass
 
+    if not text_result:
+        await message.reply_text("❌ Маълумот топилмади")
+        return
+
+    for text in text_result:
+        await message.reply_text(text)
 
 async def notify_technadzor_for_check(context, car):
     kirgan_list, chiqqan = get_last_repair_pair(car)
