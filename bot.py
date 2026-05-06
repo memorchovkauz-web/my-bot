@@ -146,6 +146,60 @@ print("CARS SYNCED")
 
 drivers_ws = sheet.worksheet("DRIVERS")
 
+def sync_drivers_to_db():
+    drivers = drivers_ws.get_all_values()[1:]
+
+    for row in drivers:
+        try:
+            telegram_id = row[0].strip() if len(row) > 0 else ""
+            name = row[1].strip() if len(row) > 1 else ""
+            surname = row[2].strip() if len(row) > 2 else ""
+            phone = row[3].strip() if len(row) > 3 else ""
+            firm = row[4].strip() if len(row) > 4 else ""
+            car = row[5].strip() if len(row) > 5 else ""
+            status = row[6].strip() if len(row) > 6 else ""
+
+            if not telegram_id:
+                continue
+
+            cursor.execute("""
+                INSERT INTO drivers (
+                    telegram_id,
+                    name,
+                    surname,
+                    phone,
+                    firm,
+                    car,
+                    status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (telegram_id)
+                DO UPDATE SET
+                    name = EXCLUDED.name,
+                    surname = EXCLUDED.surname,
+                    phone = EXCLUDED.phone,
+                    firm = EXCLUDED.firm,
+                    car = EXCLUDED.car,
+                    status = EXCLUDED.status
+            """, (
+                int(telegram_id),
+                name,
+                surname,
+                phone,
+                firm,
+                car,
+                status
+            ))
+
+        except Exception as e:
+            print("DRIVER SYNC ERROR:", e)
+
+    conn.commit()
+
+
+sync_drivers_to_db()
+print("DRIVERS SYNCED")
+
 FIRM_NAMES = [
     "Мемор Уткир Човка",
     "Сам Техно Строй Инвест",
