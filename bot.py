@@ -608,8 +608,8 @@ def history_car_buttons_by_firm(firm):
     cursor.execute("""
         SELECT
             car_number,
-            SUM(CASE WHEN status = 'Носоз' THEN 1 ELSE 0 END) AS kirgan,
-            SUM(CASE WHEN status IN ('Текширувда', 'Соз') THEN 1 ELSE 0 END) AS chiqqan
+            COUNT(*) AS total_repairs,
+            SUM(CASE WHEN status = 'Соз' THEN 1 ELSE 0 END) AS approved_repairs
         FROM repairs
         GROUP BY car_number
     """)
@@ -619,18 +619,18 @@ def history_car_buttons_by_firm(firm):
     stats = {}
     for row in stats_rows:
         stats[row[0]] = {
-            "kirgan": row[1] or 0,
-            "chiqqan": row[2] or 0
+            "total": row[1] or 0,
+            "approved": row[2] or 0
         }
 
     keyboard = []
 
     for car_number, car_type in cars:
-        car_stat = stats.get(car_number, {"kirgan": 0, "chiqqan": 0})
+        car_stat = stats.get(car_number, {"total": 0, "approved": 0})
 
         keyboard.append([
             InlineKeyboardButton(
-                f"{car_number} | {car_type} | {car_stat['kirgan']} / {car_stat['chiqqan']}",
+                f"{car_number} | {car_type} | Ремонт: {car_stat['total']} | Тасдиқланган: {car_stat['approved']}",
                 callback_data=f"car|{car_number}"
             )
         ])
