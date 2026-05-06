@@ -573,22 +573,23 @@ def get_car_fuel_type(car):
     return ""
 
 def get_repair_stats(car):
-    rows = remont_ws.get_all_values()[1:]
+    cursor.execute("""
+        SELECT status
+        FROM repairs
+        WHERE LOWER(car_number) = LOWER(%s)
+    """, (car,))
+
+    rows = cursor.fetchall()
 
     kirgan = 0
     chiqqan = 0
 
     for row in rows:
-        if len(row) < 6:
-            continue
-
-        if row[2].strip().lower() != car.strip().lower():
-            continue
-
-        status = row[5].strip()
+        status = row[0] if row[0] else ""
 
         if status == "Носоз":
             kirgan += 1
+
         elif status in ["Текширувда", "Соз"]:
             chiqqan += 1
 
