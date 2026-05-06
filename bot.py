@@ -31,42 +31,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
-def sync_cars_to_db():
-    cars = mashina_ws.get_all_values()[1:]
-
-    for row in cars:
-        try:
-            car_number = row[1].strip() if len(row) > 1 else ""
-            car_type = row[2].strip() if len(row) > 2 else ""
-            fuel_type = row[7].strip() if len(row) > 7 else ""
-
-            if not car_number:
-                continue
-
-            cursor.execute("""
-                INSERT INTO cars (
-                    car_number,
-                    car_type,
-                    fuel_type,
-                    status
-                )
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (car_number)
-                DO NOTHING
-            """, (
-                car_number,
-                car_type,
-                fuel_type,
-                "ready"
-            ))
-
-        except Exception as e:
-            print("CAR SYNC ERROR:", e)
-
-    conn.commit()
-
-sync_cars_to_db()
-print("CARS SYNCED")
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS drivers (
@@ -133,6 +97,45 @@ sheet = client.open(SHEET_NAME)
 
 remont_ws = sheet.worksheet("REMONT")
 mashina_ws = sheet.worksheet("MASHINALAR")
+
+def sync_cars_to_db():
+    cars = mashina_ws.get_all_values()[1:]
+
+    for row in cars:
+        try:
+            car_number = row[1].strip() if len(row) > 1 else ""
+            car_type = row[2].strip() if len(row) > 2 else ""
+            fuel_type = row[7].strip() if len(row) > 7 else ""
+
+            if not car_number:
+                continue
+
+            cursor.execute("""
+                INSERT INTO cars (
+                    car_number,
+                    car_type,
+                    fuel_type,
+                    status
+                )
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (car_number)
+                DO NOTHING
+            """, (
+                car_number,
+                car_type,
+                fuel_type,
+                "ready"
+            ))
+
+        except Exception as e:
+            print("CAR SYNC ERROR:", e)
+
+    conn.commit()
+
+sync_cars_to_db()
+
+print("CARS SYNCED")
+
 drivers_ws = sheet.worksheet("DRIVERS")
 
 FIRM_NAMES = [
