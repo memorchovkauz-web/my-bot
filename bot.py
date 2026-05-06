@@ -2221,6 +2221,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
                 pass
+                
             context.user_data["history_car"] = car
             context.user_data["mode"] = "history_period"
 
