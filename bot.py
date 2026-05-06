@@ -1,6 +1,7 @@
 import os
 import json
 import threading
+import psycopg2
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -25,6 +26,50 @@ from telegram.ext import (
     ContextTypes,
 )
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+conn = psycopg2.connect(DATABASE_URL)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS drivers (
+    id SERIAL PRIMARY KEY,
+    telegram_id BIGINT UNIQUE,
+    name TEXT,
+    surname TEXT,
+    phone TEXT,
+    firm TEXT,
+    car TEXT,
+    status TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS cars (
+    id SERIAL PRIMARY KEY,
+    firm TEXT,
+    car_number TEXT UNIQUE,
+    car_type TEXT,
+    status TEXT,
+    fuel_type TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS fuel_reports (
+    id SERIAL PRIMARY KEY,
+    telegram_id BIGINT,
+    car TEXT,
+    fuel_type TEXT,
+    km TEXT,
+    video_id TEXT,
+    photo_id TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+)
+""")
+
+conn.commit()
 
 TOKEN = os.getenv("BOT_TOKEN")
 
