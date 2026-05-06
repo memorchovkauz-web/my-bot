@@ -990,6 +990,9 @@ async def send_last_repairs(query, car, repair_type):
 
 
 async def send_history_by_date(message, car, start_date, end_date):
+    await message.reply_text("История функцияси ҳозирча қайта созланмоқда.")
+    return
+
 
 async def notify_technadzor_for_check(context, car):
     kirgan_list, chiqqan = get_last_repair_pair(car)
