@@ -990,8 +990,106 @@ async def send_last_repairs(query, car, repair_type):
 
 
 async def send_history_by_date(message, car, start_date, end_date):
-    await message.reply_text("История функцияси ҳозирча қайта созланмоқда.")
-    return
+    car_type = get_car_type(car)
+
+    cursor.execute("""
+        SELECT
+            id, car_number, km, repair_type, status, comment,
+            enter_video, enter_photo, entered_by,
+            exited_by, entered_at, exited_at
+        FROM repairs
+        WHERE LOWER(car_number) = LOWER(%s)
+        ORDER BY entered_at ASC, id ASC
+    """, (car,))
+
+    rows = cursor.fetchall()
+    found = False
+    pending_exit = None
+
+    for row in rows:
+        row_id = row[0]
+        car_number = row[1] or ""
+        km = row[2] or ""
+        repair_type = row[3] or ""
+        status = row[4] or ""
+        comment = row[5] or ""
+        video_id = row[6] or ""
+        photo_id = row[7] or ""
+        entered_by = row[8] or ""
+        exited_by = row[9] or ""
+        entered_at = row[10]
+        exited_at = row[11]
+
+        check_date = entered_at or exited_at
+        if not check_date:
+            continue
+
+        if isinstance(check_date, str):
+            try:
+                check_date = datetime.strptime(check_date, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                continue
+
+        if check_date.date() < start_date.date() or check_date.date() > end_date.date():
+            continue
+
+        if status == "Носоз":
+            found = True
+
+            await message.reply_text(
+                f"🔴 РЕМОНТГА КИРГАН\n\n"
+                f"🚛 Техника: {car_number}\n"
+                f"🚜 Тури: {car_type}\n"
+                f"📅 Сана: {entered_at}\n"
+                f"⏱ КМ/Моточас: {km}\n"
+                f"🔧 Ремонт тури: {repair_type}\n"
+                f"📝 Изоҳ: {comment}\n"
+                f"👤 Киритган: {entered_by}"
+            )
+
+            if photo_id:
+                await safe_send_photo(message.get_bot(), message.chat_id, photo_id)
+
+            if video_id:
+                await safe_send_video(message.get_bot(), message.chat_id, video_id)
+
+            continue
+
+        if status == "Текширувда":
+            pending_exit = row
+            continue
+
+        if status == "Соз":
+            if not pending_exit:
+                continue
+
+            found = True
+
+            exit_car_number = pending_exit[1] or ""
+            exit_comment = pending_exit[5] or ""
+            exit_video_id = pending_exit[6] or ""
+            exit_person = pending_exit[9] or pending_exit[8] or ""
+            exit_time = pending_exit[11] or pending_exit[10]
+
+            await message.reply_text(
+                f"🟢 РЕМОНТДАН ЧИҚҚАН ВА ТАСДИҚЛАНГАН\n\n"
+                f"🚛 Техника: {exit_car_number}\n"
+                f"🚜 Тури: {car_type}\n"
+                f"📅 Чиққан сана: {exit_time}\n"
+                f"📝 Изоҳ: {exit_comment}\n"
+                f"👤 Чиқарган: {exit_person}"
+            )
+
+            if exit_video_id:
+                await safe_send_video(message.get_bot(), message.chat_id, exit_video_id)
+
+            pending_exit = None
+
+    if not found:
+        await message.reply_text(
+            "Бу вақт оралиғида тасдиқланган ремонт историяси топилмади.\n\nБошқа даврни танланг:",
+            reply_markup=history_period_keyboard()
+        )
 
 
 async def notify_technadzor_for_check(context, car):
