@@ -2217,6 +2217,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mode = context.user_data.get("mode")
 
         if mode == "history_select_car":
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
             context.user_data["history_car"] = car
             context.user_data["mode"] = "history_period"
 
@@ -2303,6 +2307,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     if query.data.startswith("period|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         period = query.data.split("|", 1)[1]
         if period == "custom":
             context.user_data["mode"] = "history_custom_period"
