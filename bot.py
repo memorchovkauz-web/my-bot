@@ -662,9 +662,9 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
 
 
 async def auto_confirm_gas_transfer(context, user_id):
-    await asyncio.sleep(15)
+    await asyncio.sleep(900)  # 15 минут
     
-    if context.user_data.get("mode") != "gasgive_confirm":
+    if context.user_data.get("mode") not in ["gasgive_confirm", "gasgive_edit_menu", "gasgive_edit_note_text", "gasgive_video"]:
         return
 
     from_car = context.user_data.get("gasgive_from_car")
@@ -2554,6 +2554,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
+
+        context.user_data["mode"] = "gasgive_edit_menu"
+
+        asyncio.create_task(
+            auto_confirm_gas_transfer(context, update.effective_user.id)
+        )
 
         await query.message.reply_text(
             "✏️ Қайси маълумотни таҳрирлайсиз?",
