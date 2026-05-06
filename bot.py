@@ -1054,7 +1054,11 @@ async def send_history_by_date(message, car, start_date, end_date):
             except Exception:
                 continue
 
-        if event_date.date() < start_date.date() or event_date.date() > end_date.date():
+        start_check = start_date.date() if hasattr(start_date, "date") else start_date
+        end_check = end_date.date() if hasattr(end_date, "date") else end_date
+        event_check = event_date.date() if hasattr(event_date, "date") else event_date
+
+        if event_check < start_check or event_check > end_check:
             continue
 
         if status == "Носоз":
