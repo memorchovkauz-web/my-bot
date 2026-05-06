@@ -640,6 +640,8 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
 
 
 async def auto_confirm_gas_transfer(context, user_id):
+    await asyncio.sleep(15)
+    
     if context.user_data.get("mode") != "gasgive_confirm":
         return
 
@@ -3170,46 +3172,43 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=back_keyboard()
     )
 
-
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mode = context.user_data.get("mode")
 
-        mode = context.user_data.get("mode")
-
-        if mode == "gasgive_video":
-
-            if not update.message.video_note:
-                await update.message.reply_text(
-                    "❌ Фақат думалоқ видео қабул қилинади.\n\n"
-                    "🎥 Камида 10 сониялик думалоқ видео юборинг."
-                )
-                return
-
-            if update.message.video_note.duration < 10:
-                await update.message.reply_text(
-                    "❌ Видео 10 сониядан кам.\n\n"
-                    "🎥 Камида 10 сониялик думалоқ видео юборинг."
-                )
-                return
-
-            context.user_data["gasgive_video_id"] = update.message.video_note.file_id
-            context.user_data["mode"] = "gasgive_confirm"
-
-            from_car = context.user_data.get("gasgive_from_car")
-            to_car = context.user_data.get("gasgive_to_car")
-            note = context.user_data.get("gasgive_note")
-
+    if mode == "gasgive_video":
+        if not update.message.video_note:
             await update.message.reply_text(
-                "✅ МАЪЛУМОТЛАР\n\n"
-                f"🚛 ГАЗ берувчи: {from_car}\n"
-                f"⛽ ГАЗ олувчи: {to_car}\n"
-                f"📝 Изоҳ: {note}\n\n"
-                "Тасдиқлайсизми?",
-                reply_markup=gas_give_confirm_keyboard()
+                "❌ Фақат думалоқ видео қабул қилинади.\n\n"
+                "🎥 Камида 10 сониялик думалоқ видео юборинг."
             )
+            return
 
-            await update.message.reply_video_note(
-                video_note=update.message.video_note.file_id
+        if update.message.video_note.duration < 10:
+            await update.message.reply_text(
+                "❌ Видео 10 сониядан кам.\n\n"
+                "🎥 Камида 10 сониялик думалоқ видео юборинг."
             )
+            return
+
+        context.user_data["gasgive_video_id"] = update.message.video_note.file_id
+        context.user_data["mode"] = "gasgive_confirm"
+
+        from_car = context.user_data.get("gasgive_from_car")
+        to_car = context.user_data.get("gasgive_to_car")
+        note = context.user_data.get("gasgive_note")
+
+        await update.message.reply_text(
+            "✅ МАЪЛУМОТЛАР\n\n"
+            f"🚛 ГАЗ берувчи: {from_car}\n"
+            f"⛽ ГАЗ олувчи: {to_car}\n"
+            f"📝 Изоҳ: {note}\n\n"
+            "Тасдиқлайсизми?",
+            reply_markup=gas_give_confirm_keyboard()
+        )
+
+        await update.message.reply_video_note(
+            video_note=update.message.video_note.file_id
+        )
 
         asyncio.create_task(
             auto_confirm_gas_transfer(context, update.effective_user.id)
@@ -3298,15 +3297,13 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    
-
     if mode in ["send_km_photo", "edit_photo"]:
         await update.message.reply_text(
             "❌ Сиздан фақат одометр ёки моточас расмини юборишингизни сўрайман!",
             reply_markup=back_keyboard()
         )
         return
-    
+
     if mode in ["write_km", "edit_km"]:
         await update.message.reply_text(
             "❌ Сиздан фақат 1–8 хонали КМ/моточас рақамини киритишингизни сўрайман!",
@@ -3361,7 +3358,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start = get_last_open_repair_start_time(context.user_data.get("car"))
         end = now_text()
         duration = calculate_duration(start, end)
-
         text += f"⏳ Ремонт вақти: {duration}\n"
 
     text += (
