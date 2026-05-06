@@ -992,6 +992,19 @@ async def send_last_repairs(query, car, repair_type):
 async def send_history_by_date(message, car, start_date, end_date):
     car_type = get_car_type(car)
 
+    def to_dt(value):
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.strptime(str(value).split(".")[0], "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+    start_dt = start_date.replace(tzinfo=None)
+    end_dt = end_date.replace(tzinfo=None)
+
     cursor.execute("""
         SELECT
             id,
@@ -1000,8 +1013,8 @@ async def send_history_by_date(message, car, start_date, end_date):
             repair_type,
             status,
             comment,
-            enter_video,
             enter_photo,
+            enter_video,
             entered_by,
             exited_by,
             approved_by,
@@ -1010,7 +1023,7 @@ async def send_history_by_date(message, car, start_date, end_date):
             approved_at
         FROM repairs
         WHERE LOWER(car_number) = LOWER(%s)
-        ORDER BY entered_at ASC, id ASC
+        ORDER BY COALESCE(entered_at, exited_at, approved_at) ASC, id ASC
     """, (car,))
 
     rows = cursor.fetchall()
@@ -1026,39 +1039,20 @@ async def send_history_by_date(message, car, start_date, end_date):
         repair_type = row[3] or ""
         status = row[4] or ""
         comment = row[5] or ""
-        video_id = row[6] or ""
-        photo_id = row[7] or ""
+        photo_id = row[6] or ""
+        video_id = row[7] or ""
         entered_by = row[8] or ""
         exited_by = row[9] or ""
         approved_by = row[10] or ""
-        entered_at = row[11]
-        exited_at = row[12]
-        approved_at = row[13]
+        entered_at = to_dt(row[11])
+        exited_at = to_dt(row[12])
+        approved_at = to_dt(row[13])
 
-        event_date = entered_at or exited_at or approved_at
-
-        if len(row) < 14:
+        event_time = entered_at or exited_at or approved_at
+        if not event_time:
             continue
 
-        status = row[5].strip().lower()
-
-        if status == "соз" and row[13].strip().lower() != "tasdiqlandi":
-            continue
-
-        if not event_date:
-            continue
-
-        if isinstance(event_date, str):
-            try:
-                event_date = datetime.strptime(event_date, "%Y-%m-%d %H:%M:%S")
-            except Exception:
-                continue
-
-        start_check = start_date.date() if hasattr(start_date, "date") else start_date
-        end_check = end_date.date() if hasattr(end_date, "date") else end_date
-        event_check = event_date.date() if hasattr(event_date, "date") else event_date
-
-        if event_check < start_check or event_check > end_check:
+        if event_time < start_dt or event_time > end_dt:
             continue
 
         if status == "Носоз":
@@ -1066,13 +1060,13 @@ async def send_history_by_date(message, car, start_date, end_date):
             found = True
 
             await message.reply_text(
-                f"🔴 РЕМОНТГА КИРГАН\n\n"
+                f"🔴 Ремонтга кирган\n\n"
                 f"🚘 {car_number}\n"
                 f"🔧 Тури: {car_type}\n"
-                f"📅 Сана: {entered_at}\n"
+                f"📅 Сана: {event_time.strftime('%d-%m-%Y %H:%M')}\n"
                 f"📟 KM/Моточас: {km}\n"
                 f"🛠 Ремонт: {repair_type}\n"
-                f"📌 Статус: {status}\n"
+                f"📌 Статус: Носоз\n"
                 f"💬 Изоҳ: {comment}\n"
                 f"👨‍🔧 Киритган: {entered_by}"
             )
@@ -1093,32 +1087,38 @@ async def send_history_by_date(message, car, start_date, end_date):
             if not pending_exit:
                 continue
 
-            exit_time = pending_exit[12] or pending_exit[11]
+            exit_time = to_dt(pending_exit[12]) or to_dt(pending_exit[11])
             exit_comment = pending_exit[5] or ""
-            exit_video_id = pending_exit[6] or ""
+            exit_video_id = pending_exit[7] or ""
             exit_person = pending_exit[9] or pending_exit[8] or ""
+            approve_person = approved_by or entered_by or ""
 
-            first_start = open_repairs[0][11] if open_repairs else None
-            duration_text = calculate_duration(
-                first_start.strftime("%Y-%m-%d %H:%M:%S") if hasattr(first_start, "strftime") else str(first_start),
-                exit_time.strftime("%Y-%m-%d %H:%M:%S") if hasattr(exit_time, "strftime") else str(exit_time)
-            ) if first_start and exit_time else ""
+            first_start = None
+            if open_repairs:
+                first_start = to_dt(open_repairs[0][11])
+
+            duration_text = ""
+            if first_start and exit_time:
+                duration_text = calculate_duration(
+                    first_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    exit_time.strftime("%Y-%m-%d %H:%M:%S")
+                )
 
             repair_types = ", ".join([r[3] for r in open_repairs if r[3]]) or "Ремонтдан чиқарилди"
 
             found = True
 
             await message.reply_text(
-                f"🟢 РЕМОНТДАН ЧИҚҚАН ВА ТАСДИҚЛАНГАН\n\n"
+                f"🟢 Ремонтдан чиққан\n\n"
                 f"🚘 {car_number}\n"
                 f"🔧 Тури: {car_type}\n"
-                f"📅 Сана: {exit_time}\n"
+                f"📅 Сана: {exit_time.strftime('%d-%m-%Y %H:%M') if exit_time else ''}\n"
                 f"⏳ Ремонт учун кетган вақт: {duration_text}\n"
                 f"🛠 Ремонт: {repair_types}\n"
                 f"📌 Статус: тасдиқланди\n"
                 f"💬 Изоҳ: {exit_comment}\n"
                 f"👨‍🔧 Чиқарган: {exit_person}\n"
-                f"👤 Текширувчи: {approved_by or entered_by}"
+                f"👤 Текширувчи: {approve_person}"
             )
 
             if exit_video_id:
@@ -1132,7 +1132,6 @@ async def send_history_by_date(message, car, start_date, end_date):
             "Бу вақт оралиғида ремонт историяси топилмади.\n\nБошқа даврни танланг:",
             reply_markup=history_period_keyboard()
         )
-
 
 async def notify_technadzor_for_check(context, car):
     kirgan_list, chiqqan = get_last_repair_pair(car)
