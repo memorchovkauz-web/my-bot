@@ -334,13 +334,7 @@ def edit_keyboard_remove():
 
 
 def get_all_cars():
-    cursor.execute("""
-        SELECT id, car_number, company, status
-        FROM cars
-        ORDER BY car_number
-    """)
-    
-    return cursor.fetchall()
+    return mashina_ws.get_all_values()[1:]
 
 def get_car_type(car):
     for row in get_all_cars():
