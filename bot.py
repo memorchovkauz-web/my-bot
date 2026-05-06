@@ -2410,6 +2410,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update.effective_user.id
         ])
 
+        cursor.execute("""
+            INSERT INTO repairs (
+                car_number,
+                repair_type,
+                status,
+                comment,
+                approved_by,
+                approved_at
+            )
+            VALUES (%s, %s, %s, %s, %s, NOW())
+        """, (
+            car,
+            "Ремонтдан чиқиш тасдиқланди",
+            "Соз",
+            "Текширувчи тасдиқлади",
+            confirmed_by
+        ))
+
+        conn.commit()
+
         await query.message.reply_text(
             f"✅ {car} соз деб тасдиқланди.\nҲолат: Соз",
             reply_markup=cars_for_check_by_firm_group()
