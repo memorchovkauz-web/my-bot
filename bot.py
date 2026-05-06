@@ -386,30 +386,44 @@ def get_user_name(update):
     return user["name"] if user else "Номаълум"
 
 def get_driver_status(user_id):
-    rows = drivers_ws.get_all_values()[1:]
+    cursor.execute("""
+        SELECT status
+        FROM drivers
+        WHERE telegram_id = %s
+        LIMIT 1
+    """, (int(user_id),))
 
-    for row in rows:
-        if len(row) > 0 and str(row[0]).strip() == str(user_id):
-            return row[6].strip() if len(row) > 6 else ""
+    row = cursor.fetchone()
+
+    if row:
+        return row[0] or ""
 
     return None
 
 def get_driver_car(user_id):
-    rows = drivers_ws.get_all_values()[1:]
+    cursor.execute("""
+        SELECT car
+        FROM drivers
+        WHERE telegram_id = %s
+        LIMIT 1
+    """, (int(user_id),))
 
-    for row in rows:
-        if len(row) > 5 and str(row[0]).strip() == str(user_id):
-            return row[5].strip()
+    row = cursor.fetchone()
+
+    if row:
+        return row[0] or ""
 
     return ""
 
 def update_driver_status(user_id, status):
-    rows = drivers_ws.get_all_values()
+    cursor.execute("""
+        UPDATE drivers
+        SET status = %s
+        WHERE telegram_id = %s
+    """, (status, int(user_id)))
 
-    for i, row in enumerate(rows, start=1):
-        if len(row) > 0 and str(row[0]).strip() == str(user_id):
-            drivers_ws.update_cell(i, 7, status)  # G ustun
-            return True
+    conn.commit()
+    return True
 
     return False
 
