@@ -3211,11 +3211,11 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 video_note=update.message.video_note.file_id
             )
 
-            asyncio.create_task(
-                auto_confirm_gas_transfer(context, update.effective_user.id)
-            )
+        asyncio.create_task(
+            auto_confirm_gas_transfer(context, update.effective_user.id)
+        )
 
-            return
+        return
 
     if mode == "fuel_gas_km":
         await update.message.reply_text(
