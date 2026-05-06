@@ -1482,6 +1482,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
+    if mode == "gasgive_note":
+        if (
+            update.message.photo
+            or update.message.video
+            or update.message.audio
+            or update.message.voice
+            or update.message.document
+            or update.message.sticker
+        ):
+            await update.message.reply_text(
+                "❌ Нотўғри маълумот киритилди.\n\n"
+                "📝 Фақат текст ва рақам киритинг."
+            )
+            return
+
     if text == "⬅️ Орқага" and mode in ["fuel_menu", "gasgive_firm", "gasgive_car", "gasgive_note", "gasgive_video", "gasgive_confirm"]:
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
@@ -2765,6 +2780,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mode = context.user_data.get("mode")
 
+    if mode == "gasgive_video":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат 10 сониядан катта думалоқ видео қабул қилинади."
+        )
+        return
+
     if mode == "fuel_gas_km":
         await update.message.reply_text(
             "❌ Бу босқичда расм қабул қилинмайди.\n\n"
@@ -2885,7 +2906,55 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    mode = context.user_data.get("mode")
+        mode = context.user_data.get("mode")
+
+        if mode == "gasgive_video":
+
+            if not update.message.video_note:
+                await update.message.reply_text(
+                    "❌ Фақат думалоқ видео қабул қилинади.\n\n"
+                    "🎥 Камида 10 сониялик думалоқ видео юборинг."
+                )
+                return
+
+            if update.message.video_note.duration < 10:
+                await update.message.reply_text(
+                    "❌ Видео 10 сониядан кам.\n\n"
+                    "🎥 Камида 10 сониялик думалоқ видео юборинг."
+                )
+                return
+
+            context.user_data["gasgive_video_id"] = update.message.video_note.file_id
+            context.user_data["mode"] = "gasgive_confirm"
+
+            from_car = context.user_data.get("gasgive_from_car")
+            to_car = context.user_data.get("gasgive_to_car")
+            note = context.user_data.get("gasgive_note")
+
+            await update.message.reply_text(
+                "✅ МАЪЛУМОТЛАР\n\n"
+                f"🚛 ГАЗ берувчи: {from_car}\n"
+                f"⛽ ГАЗ олувчи: {to_car}\n"
+                f"📝 Изоҳ: {note}\n\n"
+                "Тасдиқлайсизми?",
+                reply_markup=gas_give_confirm_keyboard()
+            )
+
+            await update.message.reply_video_note(
+                video_note=update.message.video_note.file_id
+            )
+
+            context.job_queue.run_once(
+                auto_confirm_gas_transfer,
+                when=15,
+                data={
+                    "chat_id": update.effective_chat.id,
+                    "user_id": update.effective_user.id
+                },
+                name=f"gasgive_{update.effective_user.id}"
+            )
+
+            return
 
     if mode == "fuel_gas_km":
         await update.message.reply_text(
