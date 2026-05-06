@@ -173,13 +173,14 @@ def save_new_repair_to_db(
             repair_type,
             status,
             comment,
-            video_id,
-            photo_id,
-            person,
+            enter_video,
+            enter_photo,
+            entered_by,
+            exited_by,
             entered_at,
             exited_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NULLIF(%s, '')::timestamp, NULLIF(%s, '')::timestamp)
     """, (
         car_number,
         km,
@@ -188,6 +189,7 @@ def save_new_repair_to_db(
         comment,
         video_id,
         photo_id,
+        person,
         person,
         entered_at,
         exited_at
