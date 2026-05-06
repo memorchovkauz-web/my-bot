@@ -994,16 +994,29 @@ async def send_history_by_date(message, car, start_date, end_date):
 
     cursor.execute("""
         SELECT
-            id, car_number, km, repair_type, status, comment,
-            enter_video, enter_photo, entered_by,
-            exited_by, entered_at, exited_at
+            id,
+            car_number,
+            km,
+            repair_type,
+            status,
+            comment,
+            enter_video,
+            enter_photo,
+            entered_by,
+            exited_by,
+            approved_by,
+            entered_at,
+            exited_at,
+            approved_at
         FROM repairs
         WHERE LOWER(car_number) = LOWER(%s)
         ORDER BY entered_at ASC, id ASC
     """, (car,))
 
     rows = cursor.fetchall()
+
     found = False
+    open_repairs = []
     pending_exit = None
 
     for row in rows:
@@ -1017,34 +1030,39 @@ async def send_history_by_date(message, car, start_date, end_date):
         photo_id = row[7] or ""
         entered_by = row[8] or ""
         exited_by = row[9] or ""
-        entered_at = row[10]
-        exited_at = row[11]
+        approved_by = row[10] or ""
+        entered_at = row[11]
+        exited_at = row[12]
+        approved_at = row[13]
 
-        check_date = entered_at or exited_at
-        if not check_date:
+        event_date = entered_at or exited_at or approved_at
+
+        if not event_date:
             continue
 
-        if isinstance(check_date, str):
+        if isinstance(event_date, str):
             try:
-                check_date = datetime.strptime(check_date, "%Y-%m-%d %H:%M:%S")
+                event_date = datetime.strptime(event_date, "%Y-%m-%d %H:%M:%S")
             except Exception:
                 continue
 
-        if check_date.date() < start_date.date() or check_date.date() > end_date.date():
+        if event_date.date() < start_date.date() or event_date.date() > end_date.date():
             continue
 
         if status == "Носоз":
+            open_repairs.append(row)
             found = True
 
             await message.reply_text(
                 f"🔴 РЕМОНТГА КИРГАН\n\n"
-                f"🚛 Техника: {car_number}\n"
-                f"🚜 Тури: {car_type}\n"
+                f"🚘 {car_number}\n"
+                f"🔧 Тури: {car_type}\n"
                 f"📅 Сана: {entered_at}\n"
-                f"⏱ КМ/Моточас: {km}\n"
-                f"🔧 Ремонт тури: {repair_type}\n"
-                f"📝 Изоҳ: {comment}\n"
-                f"👤 Киритган: {entered_by}"
+                f"📟 KM/Моточас: {km}\n"
+                f"🛠 Ремонт: {repair_type}\n"
+                f"📌 Статус: {status}\n"
+                f"💬 Изоҳ: {comment}\n"
+                f"👨‍🔧 Киритган: {entered_by}"
             )
 
             if photo_id:
@@ -1063,31 +1081,43 @@ async def send_history_by_date(message, car, start_date, end_date):
             if not pending_exit:
                 continue
 
-            found = True
-
-            exit_car_number = pending_exit[1] or ""
+            exit_time = pending_exit[12] or pending_exit[11]
             exit_comment = pending_exit[5] or ""
             exit_video_id = pending_exit[6] or ""
             exit_person = pending_exit[9] or pending_exit[8] or ""
-            exit_time = pending_exit[11] or pending_exit[10]
+
+            first_start = open_repairs[0][11] if open_repairs else None
+            duration_text = calculate_duration(
+                first_start.strftime("%Y-%m-%d %H:%M:%S") if hasattr(first_start, "strftime") else str(first_start),
+                exit_time.strftime("%Y-%m-%d %H:%M:%S") if hasattr(exit_time, "strftime") else str(exit_time)
+            ) if first_start and exit_time else ""
+
+            repair_types = ", ".join([r[3] for r in open_repairs if r[3]]) or "Ремонтдан чиқарилди"
+
+            found = True
 
             await message.reply_text(
                 f"🟢 РЕМОНТДАН ЧИҚҚАН ВА ТАСДИҚЛАНГАН\n\n"
-                f"🚛 Техника: {exit_car_number}\n"
-                f"🚜 Тури: {car_type}\n"
-                f"📅 Чиққан сана: {exit_time}\n"
-                f"📝 Изоҳ: {exit_comment}\n"
-                f"👤 Чиқарган: {exit_person}"
+                f"🚘 {car_number}\n"
+                f"🔧 Тури: {car_type}\n"
+                f"📅 Сана: {exit_time}\n"
+                f"⏳ Ремонт учун кетган вақт: {duration_text}\n"
+                f"🛠 Ремонт: {repair_types}\n"
+                f"📌 Статус: тасдиқланди\n"
+                f"💬 Изоҳ: {exit_comment}\n"
+                f"👨‍🔧 Чиқарган: {exit_person}\n"
+                f"👤 Текширувчи: {approved_by or entered_by}"
             )
 
             if exit_video_id:
                 await safe_send_video(message.get_bot(), message.chat_id, exit_video_id)
 
+            open_repairs = []
             pending_exit = None
 
     if not found:
         await message.reply_text(
-            "Бу вақт оралиғида тасдиқланган ремонт историяси топилмади.\n\nБошқа даврни танланг:",
+            "Бу вақт оралиғида ремонт историяси топилмади.\n\nБошқа даврни танланг:",
             reply_markup=history_period_keyboard()
         )
 
