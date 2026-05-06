@@ -846,12 +846,14 @@ def save_repair_to_db(
     ))
 
 def update_car_status(car, status):
-    rows = mashina_ws.get_all_values()
+    cursor.execute("""
+        UPDATE cars
+        SET status = %s
+        WHERE LOWER(car_number) = LOWER(%s)
+    """, (status, car))
 
-    for i, row in enumerate(rows, start=1):
-        if len(row) > 1 and row[1].strip().lower() == car.strip().lower():
-            mashina_ws.update_cell(i, 7, status)
-            return True
+    conn.commit()
+    return True
 
     return False
 
