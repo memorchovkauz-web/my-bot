@@ -637,6 +637,9 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
 
     from_driver_name = short_driver_name(from_driver)
     to_driver_name = short_driver_name(to_driver)
+
+    if created_at:
+        created_at = created_at.strftime("%d.%m.%Y %H:%M:%S")
     
     await context.bot.send_message(
         chat_id=int(to_driver_id),
@@ -1634,6 +1637,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
+    if mode == "gasgive_edit_note_text":
+        if not is_valid_gas_note(text):
+            await update.message.reply_text(
+                "❌ Изоҳ фақат ҳарф ва рақамдан иборат бўлиши керак.\n\n"
+                "🔴 Янги изоҳни киритинг."
+            )
+            return
+
+        context.user_data["gasgive_note"] = text
+        context.user_data["mode"] = "gasgive_confirm"
+
+        from_car = context.user_data.get("gasgive_from_car")
+        to_car = context.user_data.get("gasgive_to_car")
+        note = context.user_data.get("gasgive_note")
+        created_time = context.user_data.get("gasgive_created_time") or now_text()
+
+        sent_msg = await update.message.reply_text(
+            "✅ МАЪЛУМОТЛАР\n\n"
+            f"🕒 Вақт: {created_time}\n"
+            f"🚛 ГАЗ берувчи: {from_car} — {context.user_data.get('gasgive_from_driver_name')}\n"
+            f"⛽ ГАЗ олувчи: {to_car} — {context.user_data.get('gasgive_to_driver_name')}\n"
+            f"📝 Изоҳ: {note}\n\n"
+            "Тасдиқлайсизми?",
+            reply_markup=gas_give_confirm_keyboard()
+        )
+
+        context.user_data["gasgive_confirm_message_id"] = sent_msg.message_id
+
+        video_id = context.user_data.get("gasgive_video_id")
+        if video_id:
+            await update.message.reply_video_note(video_note=video_id)
+
+        return
+
     if mode == "gasgive_note":
         if (
             update.message.photo
@@ -2530,7 +2567,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        context.user_data["mode"] = "gasgive_note"
+        context.user_data["mode"] = "gasgive_edit_note_text"
 
         await query.message.reply_text(
             "🔴 Янги изоҳни киритинг.\n\nФақат ҳарф ва рақам ёзиш мумкин."
