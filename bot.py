@@ -96,6 +96,64 @@ client = gspread.authorize(creds)
 sheet = client.open(SHEET_NAME)
 
 remont_ws = sheet.worksheet("REMONT")
+
+def sync_repairs_to_db():
+    rows = remont_ws.get_all_values()[1:]
+
+    for row in rows:
+        try:
+            car_number = row[2].strip() if len(row) > 2 else ""
+            km = row[3].strip() if len(row) > 3 else ""
+            repair_type = row[4].strip() if len(row) > 4 else ""
+            status = row[5].strip() if len(row) > 5 else ""
+            comment = row[6].strip() if len(row) > 6 else ""
+            video_id = row[7].strip() if len(row) > 7 else ""
+            photo_id = row[8].strip() if len(row) > 8 else ""
+            person = row[9].strip() if len(row) > 9 else ""
+            entered_at = row[10].strip() if len(row) > 10 else ""
+            exited_at = row[11].strip() if len(row) > 11 else ""
+
+            if not car_number:
+                continue
+
+            cursor.execute("""
+                INSERT INTO repairs (
+                    car_number,
+                    km,
+                    repair_type,
+                    status,
+                    comment,
+                    enter_video,
+                    enter_photo,
+                    entered_by,
+                    exited_by,
+                    entered_at,
+                    exited_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NULLIF(%s, '')::timestamp, NULLIF(%s, '')::timestamp)
+            """, (
+                car_number,
+                km,
+                repair_type,
+                status,
+                comment,
+                video_id,
+                photo_id,
+                person,
+                person,
+                entered_at,
+                exited_at
+            ))
+
+        except Exception as e:
+            print("REPAIR SYNC ERROR:", e)
+
+    conn.commit()
+
+
+sync_repairs_to_db()
+print("REPAIRS SYNCED")
+
 mashina_ws = sheet.worksheet("MASHINALAR")
 
 def sync_cars_to_db():
