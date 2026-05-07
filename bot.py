@@ -3045,18 +3045,51 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     if data.startswith("car_"):
-        try:
-            await query.edit_message_reply_markup(reply_markup=None)
-        except:
-            pass
 
         car = data.replace("car_", "")
-
-        context.user_data["driver_car"] = car
-        context.user_data["mode"] = "driver_confirm"
-
-        await show_driver_confirm(query.message, context)
-        return
+    
+        # DRIVER REGISTRATION
+        if context.user_data.get("mode") in ["driver_car", "driver_edit_car"]:
+    
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except:
+                pass
+    
+            context.user_data["driver_car"] = car
+            context.user_data["mode"] = "driver_confirm"
+    
+            await show_driver_confirm(query.message, context)
+            return
+    
+        # REPAIR SYSTEM
+        mode = context.user_data.get("mode")
+    
+        if mode == "choose_car":
+    
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except:
+                pass
+    
+            context.user_data["car"] = car
+    
+            repair_type = context.user_data.get("repair_type")
+    
+            await send_last_repairs(query, car, repair_type)
+    
+            context.user_data["mode"] = "write_km"
+    
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\n"
+                f"🔧 Ремонт тури: {repair_type}\n\n"
+                "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>\n\n"
+                "Мисол: 125000",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
 
     if data == "confirm_driver":
         user_id = update.effective_user.id
