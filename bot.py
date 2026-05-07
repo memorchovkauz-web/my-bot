@@ -1693,11 +1693,26 @@ async def save_final_data(update_or_query, context, message_obj):
     if operation == "remove":
         await notify_technadzor_for_check(context, car)
 
+    if operation == "add":
+        result_text = (
+            "✅ Маълумот сақланди.\n\n"
+            f"Вақт: {current_time}\n\n"
+            f"🚛 Техника: {car}\n\n"
+            f"📌 Ҳолат: {status}"
+        )
+    else:
+        result_text = (
+            "✅ Маълумот сақланди ва текширувга юборилди.\n\n"
+            f"Вақт: {current_time}\n\n"
+            f"🚛 Техника: {car}\n\n"
+            f"📌 Ҳолат: {status}"
+        )
+    
     await message_obj.reply_text(
-        f"✅ Маълумот сақланди.\n\n🚛 Техника: {car}\n📌 Ҳолат: {status}",
+        result_text,
         reply_markup=technadzor_keyboard() if role == "technadzor" else action_keyboard()
     )
-
+    
     saved_firm = context.user_data.get("firm")
     context.user_data.clear()
 
