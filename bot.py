@@ -4183,8 +4183,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "✅ ДИЗЕЛ БЕРИШ МАЪЛУМОТЛАРИ\n\n"
-            f"🚛 Дизел берган техника номери: {context.user_data.get('dieselgive_from_car')}\n"
-            f"🚛 Дизел олган техника номери: {context.user_data.get('dieselgive_to_car')}\n"
+            f"🚛 Дизел берган: {context.user_data.get('dieselgive_from_car')}\n"
+            f"🚛 Дизел олган: {context.user_data.get('dieselgive_to_car')}\n"
             f"🕒 Вақт: {datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%d-%m-%Y %H:%M')}\n"
             f"⛽ Литр: {context.user_data.get('dieselgive_liter')}\n"
             f"📝 Изоҳ: {context.user_data.get('dieselgive_note')}\n"
