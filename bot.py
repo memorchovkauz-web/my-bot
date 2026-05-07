@@ -345,7 +345,7 @@ STATUS_ORDER = {
 
 
 def now_text():
-    return datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%d.%m.%Y %H:%M:%S")
+    return datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def is_valid_km(value):
@@ -1689,21 +1689,7 @@ async def save_final_data(update_or_query, context, message_obj):
         exited_at=repair_end_time
     )
 
-    save_repair_to_db(
-        car=car,
-        km=km,
-        repair_type=amal,
-        status=status,
-        note=note,
-        video_id=video_id,
-        photo_id=km_photo_id,
-        person=added_by,
-        start_time=repair_start_time,
-        end_time=repair_end_time,
-        duration=repair_duration,
-        executor_id=executor_id
-    )
-
+    
     if operation == "remove":
         await notify_technadzor_for_check(context, car)
 
