@@ -4160,7 +4160,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-     if mode == "dieselgive_video":
+    if mode == "dieselgive_video":
         if not update.message.video_note:
             await update.message.reply_text(
                 "❌ Фақат думалоқ видео қабул қилинади.\n\n"
