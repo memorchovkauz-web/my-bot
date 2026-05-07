@@ -1128,14 +1128,41 @@ def save_repair_to_db(
     ))
 
 def update_car_status(car, status):
-    cursor.execute("""
-        UPDATE cars
-        SET status = %s
-        WHERE LOWER(car_number) = LOWER(%s)
-    """, (status, car))
+    global conn, cursor
 
-    conn.commit()
-    return True
+    try:
+        cursor.execute("""
+            UPDATE cars
+            SET status = %s
+            WHERE LOWER(car_number) = LOWER(%s)
+        """, (status, car))
+
+        conn.commit()
+        return True
+
+    except Exception as e:
+        print("UPDATE CAR STATUS ERROR:", e)
+
+        try:
+            conn.rollback()
+        except:
+            pass
+
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE cars
+                SET status = %s
+                WHERE LOWER(car_number) = LOWER(%s)
+            """, (status, car))
+
+            conn.commit()
+            return True
+
+        except Exception as e2:
+            print("RECONNECT UPDATE ERROR:", e2)
 
     return False
 
@@ -2576,8 +2603,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
-
-    print("CALLBACK DATA:", data)
 
     if query.data == "none":
         return
