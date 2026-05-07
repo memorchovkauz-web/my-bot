@@ -740,11 +740,16 @@ def diesel_confirm_text(context):
     created_time = context.user_data.get("dieselgive_created_time") or now_text()
     context.user_data["dieselgive_created_time"] = created_time
 
+    try:
+        shown_time = datetime.strptime(created_time, "%Y-%m-%d %H:%M:%S").strftime("%d-%m-%Y %H:%M")
+    except Exception:
+        shown_time = created_time
+
     return (
         "✅ ДИЗЕЛ БЕРИШ МАЪЛУМОТЛАРИ\n\n"
         f"🚛 Дизел берган техника номери: {context.user_data.get('dieselgive_from_car')}\n"
         f"🚛 Дизел олган техника номери: {context.user_data.get('dieselgive_to_car')}\n"
-        f"🕒 Вақт: {datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%d-%m-%Y %H:%M')}\n"
+        f"🕒 Вақт: {shown_time}\n"
         f"⛽ Литр: {context.user_data.get('dieselgive_liter')}\n"
         f"📝 Изоҳ: {context.user_data.get('dieselgive_note')}\n"
         "🎥 Видео: сақланди ✅\n\n"
@@ -1865,33 +1870,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode == "dieselgive_note":
 
-        if (
-            update.message.photo
-            or update.message.video
-            or update.message.video_note
-            or update.message.document
-            or update.message.audio
-            or update.message.voice
-            or update.message.sticker
-        ):
-            await update.message.reply_text(
-                "❌ Бу босқичда фақат текст қабул қилинади.\n\n"
-                "📝 Изоҳни қайта киритинг.",
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return
-    
         if not is_valid_gas_note(text):
             await update.message.reply_text(
                 "❌ Изоҳ нотўғри.\n\n"
                 "📝 Фақат ҳарф ва рақамдан фойдаланинг.",
-                reply_markup=back_keyboard()
+                reply_markup=ReplyKeyboardRemove()
             )
             return
-    
+
         context.user_data["dieselgive_note"] = text
-        context.user_data["mode"] = "dieselgive_edit_video"
-    
+        context.user_data["mode"] = "dieselgive_video"
+
         await update.message.reply_text(
             "🎥 Олди-берди қилаётган техникаларни думалоқ видео қилиб юборинг.\n\n"
             "⏱ Видео 10 сониядан кам бўлмасин.\n"
@@ -2134,15 +2123,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
+    if text == "⬅️ Орқага" and mode == "diesel_menu":
+        driver_car = get_driver_car(update.effective_user.id)
+        fuel_type = get_car_fuel_type(driver_car)
+
+        context.user_data.clear()
+
+        await update.message.reply_text(
+            f"🚚 Ҳайдовчи менюси\n\n"
+            f"🚛 Техника: {driver_car}\n"
+            f"⛽ Ёқилғи тури: {fuel_type}",
+            reply_markup=driver_main_keyboard(fuel_type)
+        )
+        return
+
+    if text == "⬅️ Орқага" and mode in ["dieselgive_firm", "dieselgive_edit_firm"]:
+        context.user_data["mode"] = "diesel_menu"
+
+        await update.message.reply_text(
+            "⛽ Дизел ҳисоботи бўлими\n\nАмални танланг:",
+            reply_markup=diesel_report_keyboard()
+        )
+        return
+
+    if text == "⬅️ Орқага" and mode in ["dieselgive_car", "dieselgive_edit_car"]:
+        if mode == "dieselgive_edit_car":
+            context.user_data["mode"] = "dieselgive_edit_firm"
+        else:
+            context.user_data["mode"] = "dieselgive_firm"
+
+        await update.message.reply_text(
+            "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
+            reply_markup=diesel_firm_keyboard()
+        )
+        return
+
     if mode in ["dieselgive_firm", "dieselgive_edit_firm"]:
-        if text == "⬅️ Орқага":
-            context.user_data["mode"] = "diesel_menu"
-            await update.message.reply_text(
-                "⛽ Дизел ҳисоботи бўлими\n\nАмални танланг:",
-                reply_markup=diesel_report_keyboard()
-            )
-            return
-    
         context.user_data["dieselgive_firm"] = text
 
         if mode == "dieselgive_edit_firm":
@@ -2192,14 +2208,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
     
         context.user_data["dieselgive_liter"] = text
-        context.user_data["mode"] = "dieselgive_edit_note"
+        context.user_data["mode"] = "dieselgive_note"
     
         await update.message.reply_text(
             f"🚛 ДИЗЕЛ оладиган техника: {context.user_data.get('dieselgive_to_car')}\n"
             f"⛽ Литр: {text}\n\n"
             "🔴 Нега ДИЗЕЛ беряпсиз? Изоҳ ёзинг!\n\n"
             "Фақат текст киритинг.",
-            reply_markup=back_keyboard()
+            reply_markup=ReplyKeyboardRemove()
         )
         return
 
@@ -3310,7 +3326,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⛽ Янги дизел миқдорини киритинг.\n\n"
             "Фақат рақам киритинг.\n"
             "Мисол: 60",
-            reply_markup=back_keyboard()
+            reply_markup=ReplyKeyboardRemove()
         )
         return
 
@@ -3324,7 +3340,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "📝 Янги изоҳни киритинг.",
-            reply_markup=back_keyboard()
+            reply_markup=ReplyKeyboardRemove()
         )
         return
 
@@ -4072,23 +4088,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if mode == "dieselgive_liter":
-        await update.message.reply_text(
-            "❌ Нотўғри маълумот киритилди.\n\n"
-            "⛽ Фақат литр миқдорини рақам билан киритинг.\n"
-            "Мисол: 60",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
-
-    if mode == "dieselgive_note":
-        await update.message.reply_text(
-            "❌ Нотўғри маълумот киритилди.\n\n"
-            "📝 Бу босқичда фақат изоҳ матн кўринишида қабул қилинади.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
-
     if context.user_data.get("mode") == "gasgive_receiver_reject_note":
         await update.message.reply_text(
             "❌ Бу босқичда фақат текст қабул қилинади.\n\n"
@@ -4096,10 +4095,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if mode == "dieselgive_video":
+    if mode in ["dieselgive_video", "dieselgive_edit_video"]:
         await update.message.reply_text(
             "❌ Бу босқичда фақат думалоқ видео қабул қилинади.\n\n"
-            "🎥 10 сониядан кам бўлмаган думалоқ видео юборинг."
+            "🎥 10 сониядан кам бўлмаган думалоқ видео юборинг.",
+            reply_markup=ReplyKeyboardRemove()
         )
         return
 
@@ -4223,16 +4223,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
 
-    if mode == "dieselgive_liter":
+    if mode in ["dieselgive_liter", "dieselgive_edit_liter"]:
         await update.message.reply_text(
             "❌ Нотўғри маълумот киритилди.\n\n"
             "⛽ Фақат литр миқдорини рақам билан киритинг.\n"
-            "Мисол: 120",
+            "Мисол: 60",
             reply_markup=ReplyKeyboardRemove()
         )
         return
 
-    if mode == "dieselgive_note":
+    if mode in ["dieselgive_note", "dieselgive_edit_note"]:
         await update.message.reply_text(
             "❌ Нотўғри маълумот киритилди.\n\n"
             "📝 Бу босқичда фақат текст изоҳ қабул қилинади.",
