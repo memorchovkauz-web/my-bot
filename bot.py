@@ -1284,7 +1284,12 @@ async def send_last_repairs(query, car, repair_type):
         )
 
         if item["video_id"]:
-            await safe_send_video(query.message.get_bot(), query.message.chat_id, item["video_id"])
+            media_key = f"history_{car}_{item['date']}"
+
+            await query.message.reply_text(
+                "📎 Видео мавжуд",
+                reply_markup=view_media_keyboard(media_key)
+            )
 
 
 async def send_history_by_date(message, car, start_date, end_date):
@@ -2571,6 +2576,39 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         media_key = data.split("|", 1)[1]
+
+        if media_key.startswith("history_"):
+            parts = media_key.split("_", 2)
+
+            if len(parts) < 3:
+                return
+
+            car = parts[1]
+            date_text = parts[2]
+
+            rows = remont_ws.get_all_values()[1:]
+
+            for row in rows:
+                if len(row) < 8:
+                    continue
+
+                row_date = row[1].strip()
+                row_car = row[2].strip()
+                video_id = row[7].strip()
+
+                if row_car == car and row_date == date_text:
+                    await query.message.reply_text(
+                        f"🚛 {row_car}\n📅 {row_date}"
+                    )
+
+                    if video_id:
+                        await safe_send_video(
+                            context.bot,
+                            query.message.chat_id,
+                            video_id
+                        )
+
+                    return
 
         if media_key.startswith("gas_receiver_"):
             transfer_id = media_key.replace("gas_receiver_", "")
