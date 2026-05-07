@@ -2571,25 +2571,46 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         media_key = data.split("|", 1)[1]
-        media = context.user_data.get("media_store", {}).get(media_key)
 
-        if not media:
-            await query.message.reply_text("❌ Медиа топилмади.")
+        if media_key.startswith("gas_receiver_"):
+            transfer_id = media_key.replace("gas_receiver_", "")
+
+            cursor.execute("""
+                SELECT from_car, to_car, firm, note, video_id, created_at
+                FROM gas_transfers
+                WHERE id = %s
+            """, (transfer_id,))
+
+            row = cursor.fetchone()
+
+            if not row:
+                await query.message.reply_text("❌ Медиа топилмади.")
+                return
+
+            from_car, to_car, firm, note, video_id, created_at = row
+
+            from_driver = get_driver_by_car(from_car)
+            to_driver = get_driver_by_car(to_car)
+
+            from_driver_name = short_driver_name(from_driver)
+            to_driver_name = short_driver_name(to_driver)
+
+            if created_at:
+                created_at = created_at.strftime("%d.%m.%Y %H:%M")
+
+            await query.message.reply_text(
+                "⛽ ГАЗ бериш маълумоти\n\n"
+                f"🕒 Вақт: {created_at}\n"
+                f"🏢 Фирма: {firm}\n"
+                f"🚛 Газ берувчи: {from_car} — {from_driver_name}\n"
+                f"🚛 Газ олувчи: {to_car} — {to_driver_name}\n"
+                f"📝 Изоҳ: {note}"
+            )
+
+            if video_id:
+                await safe_send_video(context.bot, query.message.chat_id, video_id)
+
             return
-
-        text = media.get("text", "")
-        photo_id = media.get("photo_id", "")
-        video_id = media.get("video_id", "")
-
-        await query.message.reply_text(text)
-
-        if photo_id:
-            await safe_send_photo(context.bot, query.message.chat_id, photo_id)
-
-        if video_id:
-            await safe_send_video(context.bot, query.message.chat_id, video_id)
-
-        return
 
     if data == "gasgive_confirm":
         try:
