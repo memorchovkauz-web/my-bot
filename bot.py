@@ -1637,6 +1637,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
+    if mode == "gasgive_receiver_reject_note":
+        if (
+            update.message.photo
+            or update.message.video
+            or update.message.video_note
+            or update.message.audio
+            or update.message.voice
+            or update.message.document
+            or update.message.sticker
+            or not is_valid_gas_note(text)
+        ):
+            await update.message.reply_text(
+                "❌ Нотўғри маълумот киритилди.\n\n"
+                "📝 Рад этиш сабабини фақат ҳарф ва рақам билан ёзинг."
+            )
+            return
+
+        transfer_id = context.user_data.get("gasgive_reject_transfer_id")
+        reject_note = text
+        reject_time = now_text()
+
+        cursor.execute("""
+            UPDATE gas_transfers
+            SET status = %s,
+                receiver_comment = %s,
+                answered_at = NOW()
+            WHERE id = %s
+            RETURNING from_driver_id, to_car
+        """, ("Рад этилди", reject_note, transfer_id))
+
+        row = cursor.fetchone()
+        conn.commit()
+
+        if row:
+            from_driver_id, to_car = row
+            await context.bot.send_message(
+                chat_id=int(from_driver_id),
+                text=(
+                    "❌ Газ бериш маълумотингиз рад этилди.\n\n"
+                    f"🚛 Техника: {to_car}\n"
+                    f"🕒 Вақт: {reject_time}\n"
+                    f"📝 Сабаб: {reject_note}"
+                )
+            )
+
+        await update.message.reply_text(
+            "❌ Маълумот рад этилди ва газ берувчи ҳайдовчига хабар юборилди."
+        )
+
+        context.user_data.clear()
+        return
+
     if mode == "gasgive_edit_note_text":
         if not is_valid_gas_note(text):
             await update.message.reply_text(
@@ -2629,24 +2681,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         transfer_id = data.split("|", 1)[1]
 
-        cursor.execute("""
-            UPDATE gas_transfers
-            SET status = %s, answered_at = NOW()
-            WHERE id = %s
-            RETURNING from_driver_id, to_car
-        """, ("Рад этилди", transfer_id))
+        context.user_data["mode"] = "gasgive_receiver_reject_note"
+        context.user_data["gasgive_reject_transfer_id"] = transfer_id
 
-        row = cursor.fetchone()
-        conn.commit()
-
-        if row:
-            from_driver_id, to_car = row
-            await context.bot.send_message(
-                chat_id=int(from_driver_id),
-                text=f"❌ Газ бериш маълумотингиз рад этилди.\n🚛 Техника: {to_car}"
-            )
-
-        await query.message.reply_text("❌ Маълумот рад этилди.")
+        await query.message.reply_text(
+            "❌ Рад этиш сабабини ёзинг.\n\n"
+            "Фақат ҳарф ва рақам қабул қилинади.",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return
 
     if data.startswith("gasgive_car|"):
@@ -3123,6 +3165,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mode = context.user_data.get("mode")
 
+    if context.user_data.get("mode") == "gasgive_receiver_reject_note":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат текст қабул қилинади.\n\n"
+            "📝 Рад этиш сабабини ҳарф ва рақам билан ёзинг."
+        )
+        return
+
     if mode == "gasgive_video":
         await update.message.reply_text(
             "❌ Бу босқичда фақат 10 сониядан катта думалоқ видео қабул қилинади."
@@ -3248,6 +3297,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
+
+    if context.user_data.get("mode") == "gasgive_receiver_reject_note":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат текст қабул қилинади.\n\n"
+            "📝 Рад этиш сабабини ҳарф ва рақам билан ёзинг."
+        )
+        return
 
     if mode == "gasgive_video":
         if not update.message.video_note:
@@ -3458,6 +3514,13 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
+
+    if context.user_data.get("mode") == "gasgive_receiver_reject_note":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат текст қабул қилинади.\n\n"
+            "📝 Рад этиш сабабини ҳарф ва рақам билан ёзинг."
+        )
+        return
 
     if mode not in ["driver_phone", "driver_phone_edit"]:
         return
