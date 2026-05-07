@@ -1470,12 +1470,12 @@ async def notify_technadzor_for_check(context, car):
                         )
                     )
 
-                    if len(kirgan) > 8 and kirgan[8]:
-                        await safe_send_photo(context.bot, user_id, kirgan[8])
-
-                    if len(kirgan) > 7 and kirgan[7]:
-                        await safe_send_video(context.bot, user_id, kirgan[7])
-
+                    if (len(kirgan) > 8 and kirgan[8]) or (len(kirgan) > 7 and kirgan[7]):
+                        await context.bot.send_message(
+                            chat_id=user_id,
+                            text="📎 Расм/видеони кўриш учун:",
+                            reply_markup=view_media_keyboard(f"tech_enter_{kirgan[0]}")
+                        )
             await context.bot.send_message(
                 chat_id=user_id,
                 text=(
@@ -1488,7 +1488,11 @@ async def notify_technadzor_for_check(context, car):
             )
 
             if len(chiqqan) > 7 and chiqqan[7]:
-                await safe_send_video(context.bot, user_id, chiqqan[7])
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="📎 Видеони кўриш учун:",
+                    reply_markup=view_media_keyboard(f"tech_exit_{chiqqan[0]}")
+                )
 
             await context.bot.send_message(
                 chat_id=user_id,
