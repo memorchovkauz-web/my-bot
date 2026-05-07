@@ -2577,6 +2577,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    print("CALLBACK DATA:", data)
+
     if query.data == "none":
         return
 
