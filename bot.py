@@ -691,6 +691,10 @@ def is_valid_gas_note(text):
     return bool(re.match(r"^[A-Za-zА-Яа-яЁёЎўҚқҒғҲҳ0-9\s]+$", text.strip())) and len(text.strip()) >= 2
 
 
+def is_valid_diesel_liter(text):
+    return text.isdigit() and 1 <= int(text) <= 9999
+    
+
 def get_driver_by_car(car):
     cursor.execute("""
         SELECT telegram_id, name, surname
@@ -1802,6 +1806,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
 
+    if mode == "dieselgive_note":
+
+        if (
+            update.message.photo
+            or update.message.video
+            or update.message.video_note
+            or update.message.document
+            or update.message.audio
+            or update.message.voice
+            or update.message.sticker
+        ):
+            await update.message.reply_text(
+                "❌ Бу босқичда фақат текст қабул қилинади.\n\n"
+                "📝 Изоҳни қайта киритинг.",
+                reply_markup=back_keyboard()
+            )
+            return
+    
+        if not is_valid_gas_note(text):
+            await update.message.reply_text(
+                "❌ Изоҳ нотўғри.\n\n"
+                "📝 Фақат ҳарф ва рақамдан фойдаланинг.",
+                reply_markup=back_keyboard()
+            )
+            return
+    
+        context.user_data["dieselgive_note"] = text
+        context.user_data["mode"] = "dieselgive_video"
+    
+        await update.message.reply_text(
+            "🎥 Олди-берди қилаётган техникаларни думалоқ видео қилиб юборинг.\n\n"
+            "⏱ Видео 10 сониядан кам бўлмасин.\n"
+            "❌ Фақат думалоқ видео қабул қилинади.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
     if mode == "gasgive_receiver_reject_note":
         if (
             update.message.photo
@@ -2059,6 +2100,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text,
                 context.user_data.get("dieselgive_from_car")
             )
+        )
+        return
+
+    if mode == "dieselgive_liter":
+
+        if (
+            update.message.photo
+            or update.message.video
+            or update.message.video_note
+            or update.message.document
+            or update.message.audio
+            or update.message.voice
+            or update.message.sticker
+        ):
+            await update.message.reply_text(
+                "❌ Фақат литр миқдорини рақам билан киритинг.\n\n"
+                "Мисол: 120",
+                reply_markup=back_keyboard()
+            )
+            return
+    
+        if not is_valid_diesel_liter(text):
+            await update.message.reply_text(
+                "❌ Нотўғри литр миқдори.\n\n"
+                "Фақат рақам киритинг.\n"
+                "Мисол: 120",
+                reply_markup=back_keyboard()
+            )
+            return
+    
+        context.user_data["dieselgive_liter"] = text
+        context.user_data["mode"] = "dieselgive_note"
+    
+        await update.message.reply_text(
+            f"🚛 ДИЗЕЛ оладиган техника: {context.user_data.get('dieselgive_to_car')}\n"
+            f"⛽ Литр: {text}\n\n"
+            "🔴 Нега ДИЗЕЛ беряпсиз? Изоҳ ёзинг!\n\n"
+            "Фақат текст киритинг.",
+            reply_markup=back_keyboard()
         )
         return
 
@@ -2412,6 +2492,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Бу босқичда фақат видео қабул қилинади.\n\n"
             "🎥 10 сониядан кам бўлмаган видео юборинг."
         )
+        return
+
+    if mode == "dieselgive_video":
+
+        if not update.message.video_note:
+            await update.message.reply_text(
+                "❌ Фақат думалоқ видео қабул қилинади.\n\n"
+                "🎥 10 сониядан кам бўлмаган думалоқ видео юборинг."
+            )
+            return
+    
+        if update.message.video_note.duration < 10:
+            await update.message.reply_text(
+                "❌ Видео 10 сониядан кам.\n\n"
+                "🎥 Қайта думалоқ видео юборинг."
+            )
+            return
+    
+        context.user_data["dieselgive_video_id"] = update.message.video_note.file_id
+        context.user_data["mode"] = "dieselgive_done"
+    
+        await update.message.reply_text(
+            "✅ ДИЗЕЛ бериш маълумоти қабул қилинди.\n\n"
+            f"🚛 Берувчи техника: {context.user_data.get('dieselgive_from_car')}\n"
+            f"🚛 Олувчи техника: {context.user_data.get('dieselgive_to_car')}\n"
+            f"⛽ Литр: {context.user_data.get('dieselgive_liter')} л\n"
+            f"📝 Изоҳ: {context.user_data.get('dieselgive_note')}\n"
+            "🎥 Видео: сақланди ✅",
+            reply_markup=diesel_report_keyboard()
+        )
+    
+        context.user_data.clear()
         return
 
     if text == "⬅️ Орқага":
@@ -3177,12 +3289,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         car = data.split("|", 1)[1]
     
         context.user_data["dieselgive_to_car"] = car
-        context.user_data["mode"] = "dieselgive_note"
+        context.user_data["mode"] = "dieselgive_liter"
     
         await query.message.reply_text(
             f"🚛 ДИЗЕЛ оладиган техника: {car}\n\n"
-            "🔴 Нега ДИЗЕЛ беряпсиз? Изоҳ ёзинг!\n\n"
-            "Фақат ҳарф ва рақам ёзиш мумкин.",
+            "⛽ Неччи литр ДИЗЕЛ беряпсиз?\n\n"
+            "Фақат рақам киритинг.\n"
+            "Мисол: 120",
             reply_markup=back_keyboard()
         )
         return
@@ -3715,9 +3828,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if mode == "gasgive_video":
+    if mode == "dieselgive_video":
         await update.message.reply_text(
-            "❌ Бу босқичда фақат 10 сониядан катта думалоқ видео қабул қилинади."
+            "❌ Бу босқичда фақат думалоқ видео қабул қилинади.\n\n"
+            "🎥 10 сониядан кам бўлмаган думалоқ видео юборинг."
         )
         return
 
