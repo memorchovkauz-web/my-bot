@@ -405,17 +405,49 @@ def get_user_name(update):
     return user["name"] if user else "Номаълум"
 
 def get_driver_status(user_id):
-    cursor.execute("""
-        SELECT status
-        FROM drivers
-        WHERE telegram_id = %s
-        LIMIT 1
-    """, (int(user_id),))
+    global conn, cursor
 
-    row = cursor.fetchone()
+    try:
+        cursor.execute("""
+            SELECT status
+            FROM drivers
+            WHERE telegram_id = %s
+            LIMIT 1
+        """, (int(user_id),))
 
-    if row:
-        return row[0] or ""
+        row = cursor.fetchone()
+
+        if row:
+            return row[0] or ""
+
+        return None
+
+    except Exception as e:
+        print("GET DRIVER STATUS ERROR:", e)
+
+        try:
+            conn.rollback()
+        except:
+            pass
+
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT status
+                FROM drivers
+                WHERE telegram_id = %s
+                LIMIT 1
+            """, (int(user_id),))
+
+            row = cursor.fetchone()
+
+            if row:
+                return row[0] or ""
+
+        except Exception as e2:
+            print("RECONNECT DRIVER STATUS ERROR:", e2)
 
     return None
 
