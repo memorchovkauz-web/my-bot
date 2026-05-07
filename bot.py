@@ -2626,13 +2626,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data == "final_confirm":
-        await save_final_data(update, context, query.message)
-
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
-
+    
+        await query.message.reply_text("⏳ Маълумот сақланмоқда...")
+    
+        await save_final_data(update, context, query.message)
+    
         await query.answer("Сақланди ✅")
         return
 
@@ -2643,6 +2645,83 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         media_key = data.split("|", 1)[1]
+
+        if media_key.startswith("tech_enter_"):
+            row_id = media_key.replace("tech_enter_", "")
+        
+            rows = remont_ws.get_all_values()[1:]
+        
+            for row in rows:
+                if len(row) < 9:
+                    continue
+        
+                if str(row[0]).strip() != str(row_id).strip():
+                    continue
+        
+                car = row[2] if len(row) > 2 else ""
+                km = row[3] if len(row) > 3 else ""
+                repair_type = row[4] if len(row) > 4 else ""
+                note = row[6] if len(row) > 6 else ""
+                video_id = row[7] if len(row) > 7 else ""
+                photo_id = row[8] if len(row) > 8 else ""
+                person = row[9] if len(row) > 9 else ""
+                sana = row[10] if len(row) > 10 else row[1]
+        
+                await query.message.reply_text(
+                    "🔴 РЕМОНТГА КИРГАН\n\n"
+                    f"🚛 Техника: {car}\n"
+                    f"📅 Сана: {sana}\n"
+                    f"⏱ КМ/Моточас: {km}\n"
+                    f"🔧 Ремонт тури: {repair_type}\n"
+                    f"📝 Изоҳ: {clean_note(note)}\n"
+                    f"👤 Киритган: {person}"
+                )
+        
+                if photo_id:
+                    await safe_send_photo(context.bot, query.message.chat_id, photo_id)
+        
+                if video_id:
+                    await safe_send_video(context.bot, query.message.chat_id, video_id)
+        
+                return
+        
+            await query.message.reply_text("❌ Медиа топилмади.")
+            return
+        
+        
+        if media_key.startswith("tech_exit_"):
+            row_id = media_key.replace("tech_exit_", "")
+        
+            rows = remont_ws.get_all_values()[1:]
+        
+            for row in rows:
+                if len(row) < 8:
+                    continue
+        
+                if str(row[0]).strip() != str(row_id).strip():
+                    continue
+        
+                car = row[2] if len(row) > 2 else ""
+                note = row[6] if len(row) > 6 else ""
+                video_id = row[7] if len(row) > 7 else ""
+                person = row[9] if len(row) > 9 else ""
+                sana = row[11] if len(row) > 11 else row[1]
+        
+                await query.message.reply_text(
+                    "🟡 РЕМОНТДАН ЧИҚҚАН\n\n"
+                    f"🚛 Техника: {car}\n"
+                    f"📅 Сана: {sana}\n"
+                    f"📝 Изоҳ: {clean_note(note)}\n"
+                    f"👤 Чиқарган: {person}"
+                )
+        
+                if video_id:
+                    await safe_send_video(context.bot, query.message.chat_id, video_id)
+        
+                return
+        
+            await query.message.reply_text("❌ Медиа топилмади.")
+            return
 
         if media_key.startswith("history_"):
             parts = media_key.split("_", 2)
