@@ -2580,6 +2580,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "none":
         return
 
+    if query.data == "final_confirm":
+        await save_final_data(update, context, query.message)
+
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await query.answer("Сақланди ✅")
+        return
+
     if data.startswith("view_media|"):
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -3105,16 +3116,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("❌ Сизга рухсат йўқ")
         return
 
-    if query.data == "final_confirm":
-        await save_final_data(update, context, query.message)
-
-        try:
-            await query.edit_message_reply_markup(reply_markup=None)
-        except Exception:
-            pass
-
-        await query.answer("Сақланди ✅")
-        return
 
     if query.data == "final_edit":
         try:
