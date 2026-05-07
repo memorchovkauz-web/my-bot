@@ -936,8 +936,8 @@ def history_car_buttons_by_firm(firm):
     cursor.execute("""
         SELECT
             car_number,
-            COUNT(*) AS total_repairs,
-            SUM(CASE WHEN status = 'Соз' THEN 1 ELSE 0 END) AS approved_repairs
+            COUNT(CASE WHEN status = 'Носоз' THEN 1 END) AS total_repairs,
+            COUNT(CASE WHEN status = 'Соз' THEN 1 END) AS approved_repairs
         FROM repairs
         GROUP BY car_number
     """)
@@ -945,8 +945,11 @@ def history_car_buttons_by_firm(firm):
     stats_rows = cursor.fetchall()
 
     stats = {}
+
     for row in stats_rows:
-        stats[row[0]] = {
+        car_number = row[0]
+
+        stats[car_number] = {
             "total": row[1] or 0,
             "approved": row[2] or 0
         }
@@ -954,7 +957,10 @@ def history_car_buttons_by_firm(firm):
     keyboard = []
 
     for car_number, car_type in cars:
-        car_stat = stats.get(car_number, {"total": 0, "approved": 0})
+        car_stat = stats.get(car_number, {
+            "total": 0,
+            "approved": 0
+        })
 
         keyboard.append([
             InlineKeyboardButton(
@@ -964,7 +970,12 @@ def history_car_buttons_by_firm(firm):
         ])
 
     if not keyboard:
-        keyboard = [[InlineKeyboardButton("❌ Техника топилмади", callback_data="none")]]
+        keyboard = [[
+            InlineKeyboardButton(
+                "❌ Техника топилмади",
+                callback_data="none"
+            )
+        ]]
 
     return InlineKeyboardMarkup(keyboard)
 
@@ -1486,8 +1497,10 @@ async def send_history_by_date(message, car, start_date, end_date):
             )
 
             if exit_video_id:
-                media_key = f"history_exit_{row_id}"
-
+                exit_row_id = pending_exit[0]
+            
+                media_key = f"history_exit_{exit_row_id}"
+            
                 await message.reply_text(
                     "📎 Видеони кўриш учун:",
                     reply_markup=view_media_keyboard(media_key)
