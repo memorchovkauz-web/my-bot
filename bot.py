@@ -1396,7 +1396,9 @@ async def send_history_by_date(message, car, start_date, end_date):
             approved_at
         FROM repairs
         WHERE LOWER(car_number) = LOWER(%s)
-        ORDER BY COALESCE(entered_at, exited_at, approved_at) ASC, id ASC
+        ORDER BY
+            COALESCE(entered_at, exited_at, approved_at) ASC,
+            id ASC
     """, (car,))
 
     rows = cursor.fetchall()
