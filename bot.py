@@ -555,6 +555,21 @@ def gas_report_keyboard():
     ], resize_keyboard=True)
 
 
+def diesel_report_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("⛽ ДИЗЕЛ олиш")],
+        [KeyboardButton("⛽ ДИЗЕЛ бериш")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
+def diesel_get_type_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("⛽ Заправкадан")],
+        [KeyboardButton("🚛 Техникадан")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
 def gas_firm_keyboard():
     cursor.execute("""
         SELECT DISTINCT firm
@@ -595,6 +610,49 @@ def gas_cars_by_firm_keyboard(firm, exclude_car=None):
 
     if not keyboard:
         keyboard = [[InlineKeyboardButton("❌ Газли техника топилмади", callback_data="none")]]
+
+    return InlineKeyboardMarkup(keyboard)
+
+def diesel_firm_keyboard():
+    cursor.execute("""
+        SELECT DISTINCT firm
+        FROM cars
+        WHERE LOWER(fuel_type) = LOWER('Дизел')
+          AND firm IS NOT NULL
+          AND firm <> ''
+        ORDER BY firm
+    """)
+    rows = cursor.fetchall()
+
+    buttons = [[KeyboardButton(row[0])] for row in rows]
+    buttons.append([KeyboardButton("⬅️ Орқага")])
+
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+
+
+def diesel_cars_by_firm_keyboard(firm, exclude_car=None):
+    cursor.execute("""
+        SELECT car_number, car_type
+        FROM cars
+        WHERE LOWER(firm) = LOWER(%s)
+          AND LOWER(fuel_type) = LOWER('Дизел')
+          AND (%s IS NULL OR LOWER(car_number) <> LOWER(%s))
+        ORDER BY car_number
+    """, (firm, exclude_car, exclude_car))
+
+    rows = cursor.fetchall()
+    keyboard = []
+
+    for car_number, car_type in rows:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{car_number} | {car_type}",
+                callback_data=f"dieselgive_car|{car_number}"
+            )
+        ])
+
+    if not keyboard:
+        keyboard = [[InlineKeyboardButton("❌ Дизел техника топилмади", callback_data="none")]]
 
     return InlineKeyboardMarkup(keyboard)
 
@@ -1904,12 +1962,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "⛽ Ёқилғи ҳисоботи":
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
-
-        if fuel_type.lower() != "газ":
+    
+        if fuel_type.lower() == "газ":
+            context.user_data["mode"] = "fuel_menu"
+            context.user_data["fuel_type"] = "Газ"
+    
             await update.message.reply_text(
-                "❌ Ҳозирча ёқилғи ҳисоботи фақат газли техникалар учун ишлайди."
+                "⛽ Ёқилғи ҳисоботи бўлими\n\nАмални танланг:",
+                reply_markup=gas_report_keyboard()
             )
             return
+    
+        if fuel_type.lower() == "дизел":
+            context.user_data["mode"] = "diesel_menu"
+            context.user_data["fuel_type"] = "Дизел"
+    
+            await update.message.reply_text(
+                "⛽ Дизел ҳисоботи бўлими\n\nАмални танланг:",
+                reply_markup=diesel_report_keyboard()
+            )
+            return
+    
+        await update.message.reply_text("❌ Бу техника учун ёқилғи тури топилмади.")
+        return
 
         context.user_data["mode"] = "fuel_menu"
 
