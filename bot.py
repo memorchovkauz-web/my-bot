@@ -1368,13 +1368,15 @@ async def send_history_by_date(message, car, start_date, end_date):
     def to_dt(value):
         if not value:
             return None
+    
         if isinstance(value, datetime):
-            return value
+            return value.replace(tzinfo=None)
+    
         try:
-            return datetime.strptime(str(value).split(".")[0], "%Y-%m-%d %H:%M:%S")
+            text = str(value).split(".")[0]
+            return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
         except Exception:
             return None
-
     start_dt = start_date.replace(tzinfo=None)
     end_dt = end_date.replace(tzinfo=None)
 
@@ -1397,7 +1399,11 @@ async def send_history_by_date(message, car, start_date, end_date):
         FROM repairs
         WHERE LOWER(car_number) = LOWER(%s)
         ORDER BY
-            COALESCE(entered_at, exited_at, approved_at) ASC,
+            COALESCE(
+                entered_at,
+                exited_at,
+                approved_at
+            )::timestamp ASC,
             id ASC
     """, (car,))
 
