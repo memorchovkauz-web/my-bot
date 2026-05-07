@@ -3144,6 +3144,150 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             return
 
+    if data == "dieselgive_confirm":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        user_id = update.effective_user.id
+        from_car = context.user_data.get("dieselgive_from_car")
+        to_car = context.user_data.get("dieselgive_to_car")
+        firm = context.user_data.get("dieselgive_firm")
+        liter = context.user_data.get("dieselgive_liter")
+        note = context.user_data.get("dieselgive_note")
+        video_id = context.user_data.get("dieselgive_video_id")
+
+        cursor.execute("""
+            INSERT INTO diesel_transfers (
+                from_driver_id,
+                from_car,
+                to_car,
+                firm,
+                liter,
+                note,
+                video_id,
+                status
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            user_id,
+            from_car,
+            to_car,
+            firm,
+            liter,
+            note,
+            video_id,
+            "Тасдиқланди"
+        ))
+
+        conn.commit()
+
+        receiver = get_driver_by_car(to_car)
+
+        if receiver:
+            to_driver_id = receiver[0]
+
+            await context.bot.send_message(
+                chat_id=int(to_driver_id),
+                text=(
+                    "⛽ Сизга ДИЗЕЛ бериш маълумоти келди\n\n"
+                    f"🚛 Дизел берган техника: {from_car}\n"
+                    f"🚛 Дизел олган техника: {to_car}\n"
+                    f"🕒 Вақт: {datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%d-%m-%Y %H:%M')}\n"
+                    f"⛽ Литр: {liter}\n"
+                    f"📝 Изоҳ: {note}\n"
+                    "🎥 Видео: сақланди ✅"
+                )
+            )
+
+            if video_id:
+                await context.bot.send_video_note(
+                    chat_id=int(to_driver_id),
+                    video_note=video_id
+                )
+
+        await query.message.reply_text(
+            "✅ Дизел бериш маълумоти сақланди ва олувчи ҳайдовчига хабар юборилди.",
+            reply_markup=diesel_report_keyboard()
+        )
+
+        context.user_data.clear()
+        return
+
+    if data == "dieselgive_edit":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_edit_menu"
+
+        await query.message.reply_text(
+            "✏️ Қайси маълумотни таҳрирлайсиз?",
+            reply_markup=diesel_give_edit_keyboard()
+        )
+        return
+
+    if data == "diesel_edit_car":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_firm"
+
+        await query.message.reply_text(
+            "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
+            reply_markup=diesel_firm_keyboard()
+        )
+        return
+
+    if data == "diesel_edit_liter":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_liter"
+
+        await query.message.reply_text(
+            "⛽ Янги дизел миқдорини киритинг.\n\n"
+            "Фақат рақам киритинг.\n"
+            "Мисол: 60",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if data == "diesel_edit_note":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_note"
+
+        await query.message.reply_text(
+            "📝 Янги изоҳни киритинг.",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if data == "diesel_edit_video":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_video"
+
+        await query.message.reply_text(
+            "🎥 Янги думалоқ видео юборинг.\n\n"
+            "⏱ Видео 10 сониядан кам бўлмасин.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
     if data == "gasgive_confirm":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -3848,6 +3992,23 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mode = context.user_data.get("mode")
 
+    if mode == "dieselgive_liter":
+        await update.message.reply_text(
+            "❌ Нотўғри маълумот киритилди.\n\n"
+            "⛽ Фақат литр миқдорини рақам билан киритинг.\n"
+            "Мисол: 60",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "dieselgive_note":
+        await update.message.reply_text(
+            "❌ Нотўғри маълумот киритилди.\n\n"
+            "📝 Бу босқичда фақат изоҳ матн кўринишида қабул қилинади.",
+            reply_markup=back_keyboard()
+        )
+        return
+
     if context.user_data.get("mode") == "gasgive_receiver_reject_note":
         await update.message.reply_text(
             "❌ Бу босқичда фақат текст қабул қилинади.\n\n"
@@ -3999,7 +4160,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if mode == "dieselgive_video":
+     if mode == "dieselgive_video":
         if not update.message.video_note:
             await update.message.reply_text(
                 "❌ Фақат думалоқ видео қабул қилинади.\n\n"
@@ -4021,7 +4182,14 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "dieselgive_confirm"
 
         await update.message.reply_text(
-            "✅ ДИЗЕЛ БЕРИШ МАЪЛУМОТЛАРИ",
+            "✅ ДИЗЕЛ БЕРИШ МАЪЛУМОТЛАРИ\n\n"
+            f"🚛 Дизел берган техника номери: {context.user_data.get('dieselgive_from_car')}\n"
+            f"🚛 Дизел олган техника номери: {context.user_data.get('dieselgive_to_car')}\n"
+            f"🕒 Вақт: {datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%d-%m-%Y %H:%M')}\n"
+            f"⛽ Литр: {context.user_data.get('dieselgive_liter')}\n"
+            f"📝 Изоҳ: {context.user_data.get('dieselgive_note')}\n"
+            "🎥 Видео: сақланди ✅\n\n"
+            "Маълумот тўғрими?",
             reply_markup=diesel_give_final_keyboard()
         )
         return
