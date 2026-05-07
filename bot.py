@@ -591,6 +591,11 @@ def gas_receiver_confirm_keyboard(transfer_id):
         ]
     ])
 
+def view_media_keyboard(media_key):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👁 Кўриш", callback_data=f"view_media|{media_key}")]
+    ])
+
 
 def is_valid_gas_note(text):
     return bool(re.match(r"^[A-Za-zА-Яа-яЁёЎўҚқҒғҲҳ0-9\s]+$", text.strip())) and len(text.strip()) >= 2
@@ -641,22 +646,34 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
     if created_at:
         created_at = created_at.strftime("%d.%m.%Y %H:%M:%S")
     
+    message_text = (
+        "⛽ Сизга ГАЗ бериш маълумоти келди\n\n"
+        f"🕒 Вақт: {created_at}\n"
+        f"🏢 Фирма: {firm}\n"
+        f"🚛 Газ берувчи: {from_car} — {from_driver_name}\n"
+        f"🚛 Газ олувчи: {to_car} — {to_driver_name}\n"
+        f"📝 Изоҳ: {note}\n\n"
+        "Тасдиқлайсизми?"
+    )
+
     await context.bot.send_message(
         chat_id=int(to_driver_id),
-        text=(
-            "⛽ Сизга ГАЗ бериш маълумоти келди\n\n"
-            f"🕒 Вақт: {created_at}\n"
-            f"🏢 Фирма: {firm}\n"
-            f"🚛 Газ берувчи: {from_car} — {from_driver_name}\n"
-            f"🚛 Газ олувчи: {to_car} — {to_driver_name}\n"
-            f"📝 Изоҳ: {note}\n\n"
-"Тасдиқлайсизми?"
-        ),
+        text=message_text,
         reply_markup=gas_receiver_confirm_keyboard(transfer_id)
     )
 
-    if video_id:
-        await safe_send_video(context.bot, int(to_driver_id), video_id)
+    context.user_data.setdefault("media_store", {})
+    context.user_data["media_store"][f"gas_receiver_{transfer_id}"] = {
+        "text": message_text,
+        "photo_id": "",
+        "video_id": video_id
+    }
+
+    await context.bot.send_message(
+        chat_id=int(to_driver_id),
+        text="📎 Расм/видеони кўриш учун пастдаги тугмани босинг:",
+        reply_markup=view_media_keyboard(f"gas_receiver_{transfer_id}")
+    )
 
     asyncio.create_task(auto_accept_gas_transfer(context, transfer_id))
 
@@ -2545,6 +2562,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if query.data == "none":
+        return
+
+    if data.startswith("view_media|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        media_key = data.split("|", 1)[1]
+        media = context.user_data.get("media_store", {}).get(media_key)
+
+        if not media:
+            await query.message.reply_text("❌ Медиа топилмади.")
+            return
+
+        text = media.get("text", "")
+        photo_id = media.get("photo_id", "")
+        video_id = media.get("video_id", "")
+
+        await query.message.reply_text(text)
+
+        if photo_id:
+            await safe_send_photo(context.bot, query.message.chat_id, photo_id)
+
+        if video_id:
+            await safe_send_video(context.bot, query.message.chat_id, video_id)
+
         return
 
     if data == "gasgive_confirm":
