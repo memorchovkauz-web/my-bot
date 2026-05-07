@@ -1460,8 +1460,35 @@ async def send_history_by_date(message, car, start_date, end_date):
 
         if status == "Соз":
             if not pending_exit:
+                cursor.execute("""
+                    SELECT
+                        id,
+                        car_number,
+                        km,
+                        repair_type,
+                        status,
+                        comment,
+                        enter_photo,
+                        enter_video,
+                        entered_by,
+                        exited_by,
+                        approved_by,
+                        entered_at,
+                        exited_at,
+                        approved_at
+                    FROM repairs
+                    WHERE LOWER(car_number) = LOWER(%s)
+                      AND status = 'Текширувда'
+                      AND id < %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                """, (car_number, row_id))
+        
+                pending_exit = cursor.fetchone()
+        
+            if not pending_exit:
                 continue
-
+                
             exit_time = to_dt(pending_exit[12]) or to_dt(pending_exit[11])
             exit_comment = pending_exit[5] or ""
             exit_video_id = pending_exit[7] or ""
