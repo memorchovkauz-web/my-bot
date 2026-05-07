@@ -3280,15 +3280,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ))
         
         conn.commit()
-            user_id,
-            context.user_data.get("driver_name", ""),
-            context.user_data.get("driver_surname", ""),
-            context.user_data.get("phone", ""),
-            context.user_data.get("driver_firm", ""),
-            context.user_data.get("driver_car", ""),
-            "Текширувда",
-            now_text()
-        ])
                         
         for tech_id in get_user_ids_by_role("technadzor"):
             try:
