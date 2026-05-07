@@ -666,6 +666,24 @@ def gas_give_confirm_keyboard():
     ])
 
 
+def diesel_give_confirm_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data="dieselgive_confirm"),
+            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="dieselgive_edit")
+        ]
+    ])
+
+
+def diesel_give_edit_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚛 Техникани ўзгартириш", callback_data="diesel_edit_car")],
+        [InlineKeyboardButton("⛽ Литр", callback_data="diesel_edit_liter")],
+        [InlineKeyboardButton("📝 Изоҳ", callback_data="diesel_edit_note")],
+        [InlineKeyboardButton("🎥 Видео", callback_data="diesel_edit_video")]
+    ])
+
+
 def gas_give_edit_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 Изоҳ", callback_data="gasgive_edit_note")],
@@ -2494,6 +2512,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if mode == "dieselgive_liter":
+        await update.message.reply_text(
+            "❌ Фақат литр миқдорини рақам билан киритинг.\n\n"
+            "Мисол: 120",
+            reply_markup=back_keyboard()
+        )
+        return
+    
+    
+    if mode == "dieselgive_note":
+        await update.message.reply_text(
+            "❌ Бу босқичда фақат текст қабул қилинади.\n\n"
+            "📝 Изоҳни қайта киритинг.",
+            reply_markup=back_keyboard()
+        )
+        return
+    
+    
     if mode == "dieselgive_video":
 
         if not update.message.video_note:
@@ -3966,14 +4002,16 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message.video_note:
             await update.message.reply_text(
                 "❌ Фақат думалоқ видео қабул қилинади.\n\n"
-                "🎥 Камида 10 сониялик думалоқ видео юборинг."
+                "🎥 10 сониядан кам бўлмаган думалоқ видео юборинг."
             )
             return
-
-        if update.message.video_note.duration < 10:
+        
+        duration = update.message.video_note.duration
+        
+        if duration < 10:
             await update.message.reply_text(
                 "❌ Видео 10 сониядан кам.\n\n"
-                "🎥 Камида 10 сониялик думалоқ видео юборинг."
+                "🎥 Қайта думалоқ видео юборинг."
             )
             return
 
