@@ -89,6 +89,21 @@ CREATE TABLE IF NOT EXISTS gas_transfers (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS diesel_transfers (
+    id BIGSERIAL PRIMARY KEY,
+    from_driver_id BIGINT,
+    from_car TEXT,
+    to_car TEXT,
+    firm TEXT,
+    liter TEXT,
+    note TEXT,
+    video_id TEXT,
+    status TEXT DEFAULT 'Тасдиқланди',
+    created_at TIMESTAMP DEFAULT NOW()
+)
+""")
+
 conn.commit()
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -667,6 +682,14 @@ def gas_give_confirm_keyboard():
 
 
 def diesel_give_confirm_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data="dieselgive_confirm"),
+            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="dieselgive_edit")
+        ]
+    ])
+
+def diesel_give_final_keyboard():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Тасдиқлаш", callback_data="dieselgive_confirm"),
@@ -2549,14 +2572,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["dieselgive_video_id"] = update.message.video_note.file_id
         context.user_data["mode"] = "dieselgive_done"
     
+        summary = (
+            f"⛽ ДИЗЕЛ БЕРИШ ТАСДИҒИ\n\n"
+            f"🚛 Дизел берадиган техника: {context.user_data.get('dieselgive_from_car', '-')}\n"
+            f"🚜 Дизел оладиган техника: {context.user_data.get('dieselgive_to_car', '-')}\n"
+            f"📅 Сана: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+            f"⛽ Дизел миқдори: {context.user_data.get('dieselgive_liter', '-')}\n"
+            f"📝 Изоҳ: {context.user_data.get('dieselgive_comment', '-')}\n"
+            f"🎥 Видео: Қабул қилинди"
+        )
+        
         await update.message.reply_text(
-            "✅ ДИЗЕЛ бериш маълумоти қабул қилинди.\n\n"
-            f"🚛 Берувчи техника: {context.user_data.get('dieselgive_from_car')}\n"
-            f"🚛 Олувчи техника: {context.user_data.get('dieselgive_to_car')}\n"
-            f"⛽ Литр: {context.user_data.get('dieselgive_liter')} л\n"
-            f"📝 Изоҳ: {context.user_data.get('dieselgive_note')}\n"
-            "🎥 Видео: сақланди ✅",
-            reply_markup=diesel_report_keyboard()
+            summary,
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Тасдиқлаш", callback_data="dieselgive_confirm"),
+                    InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="dieselgive_edit")
+                ]
+            ])
         )
     
         context.user_data.clear()
