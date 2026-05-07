@@ -1374,11 +1374,13 @@ async def send_history_by_date(message, car, start_date, end_date):
                 f"👨‍🔧 Киритган: {entered_by}"
             )
 
-            if photo_id:
-                await safe_send_photo(message.get_bot(), message.chat_id, photo_id)
+            if photo_id or video_id:
+                media_key = f"history_enter_{row_id}"
 
-            if video_id:
-                await safe_send_video(message.get_bot(), message.chat_id, video_id)
+                await message.reply_text(
+                    "📎 Расм/видеони кўриш учун:",
+                    reply_markup=view_media_keyboard(media_key)
+                )
 
             continue
 
@@ -1425,7 +1427,12 @@ async def send_history_by_date(message, car, start_date, end_date):
             )
 
             if exit_video_id:
-                await safe_send_video(message.get_bot(), message.chat_id, exit_video_id)
+                media_key = f"history_exit_{row_id}"
+
+                await message.reply_text(
+                    "📎 Видеони кўриш учун:",
+                    reply_markup=view_media_keyboard(media_key)
+                )
 
             open_repairs = []
             pending_exit = None
@@ -2624,6 +2631,81 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not row:
                 await query.message.reply_text("❌ Медиа топилмади.")
                 return
+
+
+        if media_key.startswith("history_enter_"):
+            repair_id = media_key.replace("history_enter_", "")
+
+            cursor.execute("""
+                SELECT car_number, km, repair_type, status, comment,
+                       enter_photo, enter_video, entered_by, entered_at
+                FROM repairs
+                WHERE id = %s
+            """, (repair_id,))
+
+            row = cursor.fetchone()
+
+            if not row:
+                await query.message.reply_text("❌ Медиа топилмади.")
+                return
+
+            car_number, km, repair_type, status, comment, photo_id, video_id, entered_by, entered_at = row
+
+            if entered_at:
+                entered_at = entered_at.strftime("%d.%m.%Y %H:%M")
+
+            await query.message.reply_text(
+                f"🔴 Ремонтга кирган\n\n"
+                f"🚘 {car_number}\n"
+                f"📅 Сана: {entered_at}\n"
+                f"📟 KM/Моточас: {km}\n"
+                f"🛠 Ремонт: {repair_type}\n"
+                f"📌 Статус: {status}\n"
+                f"💬 Изоҳ: {comment}\n"
+                f"👨‍🔧 Киритган: {entered_by}"
+            )
+
+            if photo_id:
+                await safe_send_photo(context.bot, query.message.chat_id, photo_id)
+        
+            if video_id:
+                await safe_send_video(context.bot, query.message.chat_id, video_id)
+        
+            return
+        
+        
+        if media_key.startswith("history_exit_"):
+            repair_id = media_key.replace("history_exit_", "")
+        
+            cursor.execute("""
+                SELECT car_number, comment, enter_video, exited_by, exited_at
+                FROM repairs
+                WHERE id = %s
+            """, (repair_id,))
+        
+            row = cursor.fetchone()
+        
+            if not row:
+                await query.message.reply_text("❌ Медиа топилмади.")
+                return
+        
+            car_number, comment, video_id, exited_by, exited_at = row
+        
+            if exited_at:
+                exited_at = exited_at.strftime("%d.%m.%Y %H:%M")
+        
+            await query.message.reply_text(
+                f"🟢 Ремонтдан чиққан\n\n"
+                f"🚘 {car_number}\n"
+                f"📅 Сана: {exited_at}\n"
+                f"💬 Изоҳ: {comment}\n"
+                f"👨‍🔧 Чиқарган: {exited_by}"
+            )
+        
+            if video_id:
+                await safe_send_video(context.bot, query.message.chat_id, video_id)
+        
+            return
 
             from_car, to_car, firm, note, video_id, created_at = row
 
