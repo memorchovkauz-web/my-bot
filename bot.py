@@ -2551,49 +2551,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=back_keyboard()
         )
         return
-    
-    
-    if mode == "dieselgive_video":
 
-        if not update.message.video_note:
-            await update.message.reply_text(
-                "❌ Фақат думалоқ видео қабул қилинади.\n\n"
-                "🎥 10 сониядан кам бўлмаган думалоқ видео юборинг."
-            )
-            return
-    
-        if update.message.video_note.duration < 10:
-            await update.message.reply_text(
-                "❌ Видео 10 сониядан кам.\n\n"
-                "🎥 Қайта думалоқ видео юборинг."
-            )
-            return
-    
-        context.user_data["dieselgive_video_id"] = update.message.video_note.file_id
-        context.user_data["mode"] = "dieselgive_done"
-    
-        summary = (
-            f"⛽ ДИЗЕЛ БЕРИШ ТАСДИҒИ\n\n"
-            f"🚛 Дизел берадиган техника: {context.user_data.get('dieselgive_from_car', '-')}\n"
-            f"🚜 Дизел оладиган техника: {context.user_data.get('dieselgive_to_car', '-')}\n"
-            f"📅 Сана: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
-            f"⛽ Дизел миқдори: {context.user_data.get('dieselgive_liter', '-')}\n"
-            f"📝 Изоҳ: {context.user_data.get('dieselgive_comment', '-')}\n"
-            f"🎥 Видео: Қабул қилинди"
-        )
-        
-        await update.message.reply_text(
-            summary,
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("✅ Тасдиқлаш", callback_data="dieselgive_confirm"),
-                    InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="dieselgive_edit")
-                ]
-            ])
-        )
-    
-        context.user_data.clear()
-        return
 
     if text == "⬅️ Орқага":
         if mode == "driver_car":
@@ -4023,6 +3981,50 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
+
+    if mode == "dieselgive_liter":
+        await update.message.reply_text(
+            "❌ Нотўғри маълумот киритилди.\n\n"
+            "⛽ Фақат литр миқдорини рақам билан киритинг.\n"
+            "Мисол: 120",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "dieselgive_note":
+        await update.message.reply_text(
+            "❌ Нотўғри маълумот киритилди.\n\n"
+            "📝 Бу босқичда фақат текст изоҳ қабул қилинади.",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "dieselgive_video":
+        if not update.message.video_note:
+            await update.message.reply_text(
+                "❌ Фақат думалоқ видео қабул қилинади.\n\n"
+                "🎥 10 сониядан кам бўлмаган думалоқ видео юборинг.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if update.message.video_note.duration < 10:
+            await update.message.reply_text(
+                "❌ Видео 10 сониядан кам.\n\n"
+                "🎥 Қайта 10 сониядан кам бўлмаган думалоқ видео юборинг.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["dieselgive_video_id"] = update.message.video_note.file_id
+        context.user_data["dieselgive_created_time"] = now_text()
+        context.user_data["mode"] = "dieselgive_confirm"
+
+        await update.message.reply_text(
+            "✅ ДИЗЕЛ БЕРИШ МАЪЛУМОТЛАРИ",
+            reply_markup=diesel_give_final_keyboard()
+        )
+        return
 
     if context.user_data.get("mode") == "gasgive_receiver_reject_note":
         await update.message.reply_text(
