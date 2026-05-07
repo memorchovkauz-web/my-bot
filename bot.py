@@ -3240,36 +3240,46 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
 
         drivers_ws.append_row([
-            cursor.execute("""
-                INSERT INTO drivers (
-                    telegram_id,
-                    name,
-                    surname,
-                    phone,
-                    firm,
-                    car,
-                    status
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (telegram_id)
-                DO UPDATE SET
-                    name = EXCLUDED.name,
-                    surname = EXCLUDED.surname,
-                    phone = EXCLUDED.phone,
-                    firm = EXCLUDED.firm,
-                    car = EXCLUDED.car,
-                    status = EXCLUDED.status
-            """, (
-                user_id,
-                context.user_data.get("driver_name", ""),
-                context.user_data.get("driver_surname", ""),
-                context.user_data.get("phone", ""),
-                context.user_data.get("driver_firm", ""),
-                context.user_data.get("driver_car", ""),
-                "Текширувда"
-            ))
-            
-            conn.commit()
+            user_id,
+            context.user_data.get("driver_name", ""),
+            context.user_data.get("driver_surname", ""),
+            context.user_data.get("phone", ""),
+            context.user_data.get("driver_firm", ""),
+            context.user_data.get("driver_car", ""),
+            "Текширувда",
+            now_text()
+        ])
+        
+        cursor.execute("""
+            INSERT INTO drivers (
+                telegram_id,
+                name,
+                surname,
+                phone,
+                firm,
+                car,
+                status
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (telegram_id)
+            DO UPDATE SET
+                name = EXCLUDED.name,
+                surname = EXCLUDED.surname,
+                phone = EXCLUDED.phone,
+                firm = EXCLUDED.firm,
+                car = EXCLUDED.car,
+                status = EXCLUDED.status
+        """, (
+            user_id,
+            context.user_data.get("driver_name", ""),
+            context.user_data.get("driver_surname", ""),
+            context.user_data.get("phone", ""),
+            context.user_data.get("driver_firm", ""),
+            context.user_data.get("driver_car", ""),
+            "Текширувда"
+        ))
+        
+        conn.commit()
             user_id,
             context.user_data.get("driver_name", ""),
             context.user_data.get("driver_surname", ""),
