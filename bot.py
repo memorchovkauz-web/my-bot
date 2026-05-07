@@ -2030,7 +2030,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["dieselgive_from_car"] = driver_car
     
         await update.message.reply_text(
-            "🏢 Қайси фирмадаги дизел техникага ДИЗЕЛ беряпсиз?",
+            "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
             reply_markup=diesel_firm_keyboard()
         )
         return
