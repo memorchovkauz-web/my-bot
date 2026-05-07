@@ -2014,20 +2014,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "⛽ ГАЗ бериш":
+    if text == "⛽ ДИЗЕЛ бериш":
+        if context.user_data.get("mode") != "diesel_menu":
+            await update.message.reply_text("❌ Бу амал фақат дизел менюсида ишлайди.")
+            return
+    
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
-
-        if fuel_type.lower() != "газ":
-            await update.message.reply_text("ГАЗ бериш фақат газли техника ҳайдовчилари учун.")
+    
+        if fuel_type.lower() != "дизел":
+            await update.message.reply_text("❌ Дизел бериш фақат дизел техника ҳайдовчилари учун.")
             return
-
-        context.user_data["mode"] = "gasgive_firm"
-        context.user_data["gasgive_from_car"] = driver_car
-
+    
+        context.user_data["mode"] = "dieselgive_firm"
+        context.user_data["dieselgive_from_car"] = driver_car
+    
         await update.message.reply_text(
-            "🏢 Қайси фирмадаги газли техникага ГАЗ беряпсиз?",
-            reply_markup=gas_firm_keyboard()
+            "🏢 Қайси фирмадаги дизел техникага ДИЗЕЛ беряпсиз?",
+            reply_markup=diesel_firm_keyboard()
+        )
+        return
+
+
+    if mode == "dieselgive_firm":
+        if text == "⬅️ Орқага":
+            context.user_data["mode"] = "diesel_menu"
+            await update.message.reply_text(
+                "⛽ Дизел ҳисоботи бўлими\n\nАмални танланг:",
+                reply_markup=diesel_report_keyboard()
+            )
+            return
+    
+        context.user_data["dieselgive_firm"] = text
+        context.user_data["mode"] = "dieselgive_car"
+    
+        await update.message.reply_text(
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=back_keyboard()
+        )
+    
+        await update.message.reply_text(
+            "🚛 Қайси дизел техникага ДИЗЕЛ беряпсиз?",
+            reply_markup=diesel_cars_by_firm_keyboard(
+                text,
+                context.user_data.get("dieselgive_from_car")
+            )
         )
         return
 
@@ -3132,6 +3163,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             f"🚛 ГАЗ оладиган техника: {car}\n\n"
             "🔴 Нега ГАЗ беряпсиз? Изоҳ ёзинг!\n\n"
+            "Фақат ҳарф ва рақам ёзиш мумкин.",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if data.startswith("dieselgive_car|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+    
+        car = data.split("|", 1)[1]
+    
+        context.user_data["dieselgive_to_car"] = car
+        context.user_data["mode"] = "dieselgive_note"
+    
+        await query.message.reply_text(
+            f"🚛 ДИЗЕЛ оладиган техника: {car}\n\n"
+            "🔴 Нега ДИЗЕЛ беряпсиз? Изоҳ ёзинг!\n\n"
             "Фақат ҳарф ва рақам ёзиш мумкин.",
             reply_markup=back_keyboard()
         )
