@@ -2646,7 +2646,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
     
-        await query.message.reply_text("⏳ Маълумот сақланмоқда...")
     
         await save_final_data(update, context, query.message)
     
