@@ -96,7 +96,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 USERS = {
     492894595: {"role": "director", "name": "Jahongir Ganiyev"},
     1026372827: {"role": "mechanic", "name": "Пармонов Гиёс"},
-    1950294513: {"role": "mechanic", "name": "{Холикулов Шехроз"},
+    1950294513: {"role": "mechanic", "name": "Холикулов Шехроз"},
     492894594: {"role": "technadzor", "name": "Jahongir Ganiyev"},
     1973869412: {"role": "technadzor", "name": "офис"},
     444444444: {"role": "slesar", "name": "Слесарь исми"},
@@ -1368,48 +1368,29 @@ async def send_history_by_date(message, car, start_date, end_date):
     def to_dt(value):
         if not value:
             return None
-    
         if isinstance(value, datetime):
             return value.replace(tzinfo=None)
-    
         try:
-            text = str(value).split(".")[0]
-            return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+            return datetime.strptime(str(value).split(".")[0], "%Y-%m-%d %H:%M:%S")
         except Exception:
             return None
+
     start_dt = start_date.replace(tzinfo=None)
     end_dt = end_date.replace(tzinfo=None)
 
     cursor.execute("""
         SELECT
-            id,
-            car_number,
-            km,
-            repair_type,
-            status,
-            comment,
-            enter_photo,
-            enter_video,
-            entered_by,
-            exited_by,
-            approved_by,
-            entered_at,
-            exited_at,
-            approved_at
+            id, car_number, km, repair_type, status, comment,
+            enter_photo, enter_video, entered_by, exited_by,
+            approved_by, entered_at, exited_at, approved_at
         FROM repairs
         WHERE LOWER(car_number) = LOWER(%s)
-        ORDER BY
-            COALESCE(
-                entered_at,
-                exited_at,
-                approved_at
-            )::timestamp ASC,
-            id ASC
+        ORDER BY id ASC
     """, (car,))
 
     rows = cursor.fetchall()
 
-    found = False
+    events = []
     open_repairs = []
     pending_exit = None
 
@@ -1429,37 +1410,28 @@ async def send_history_by_date(message, car, start_date, end_date):
         exited_at = to_dt(row[12])
         approved_at = to_dt(row[13])
 
-        event_time = entered_at or exited_at or approved_at
-        if not event_time:
-            continue
+        if status == "Носоз" and entered_at:
+            if start_dt <= entered_at <= end_dt:
+                events.append({
+                    "time": entered_at,
+                    "type": "enter",
+                    "row_id": row_id,
+                    "text": (
+                        f"🔴 Ремонтга кирган\n\n"
+                        f"🚘 {car_number}\n"
+                        f"🔧 Тури: {car_type}\n"
+                        f"📅 Сана: {entered_at.strftime('%d-%m-%Y %H:%M')}\n"
+                        f"📟 KM/Моточас: {km}\n"
+                        f"🛠 Ремонт: {repair_type}\n"
+                        f"📌 Статус: Носоз\n"
+                        f"💬 Изоҳ: {comment}\n"
+                        f"👨‍🔧 Киритган: {entered_by}"
+                    ),
+                    "photo_id": photo_id,
+                    "video_id": video_id
+                })
 
-        if event_time < start_dt or event_time > end_dt:
-            continue
-
-        if status == "Носоз":
             open_repairs.append(row)
-            found = True
-
-            await message.reply_text(
-                f"🔴 Ремонтга кирган\n\n"
-                f"🚘 {car_number}\n"
-                f"🔧 Тури: {car_type}\n"
-                f"📅 Сана: {event_time.strftime('%d-%m-%Y %H:%M')}\n"
-                f"📟 KM/Моточас: {km}\n"
-                f"🛠 Ремонт: {repair_type}\n"
-                f"📌 Статус: Носоз\n"
-                f"💬 Изоҳ: {comment}\n"
-                f"👨‍🔧 Киритган: {entered_by}"
-            )
-
-            if photo_id or video_id:
-                media_key = f"history_enter_{row_id}"
-
-                await message.reply_text(
-                    "📎 Расм/видеони кўриш учун:",
-                    reply_markup=view_media_keyboard(media_key)
-                )
-
             continue
 
         if status == "Текширувда":
@@ -1468,47 +1440,27 @@ async def send_history_by_date(message, car, start_date, end_date):
 
         if status == "Соз":
             if not pending_exit:
-                cursor.execute("""
-                    SELECT
-                        id,
-                        car_number,
-                        km,
-                        repair_type,
-                        status,
-                        comment,
-                        enter_photo,
-                        enter_video,
-                        entered_by,
-                        exited_by,
-                        approved_by,
-                        entered_at,
-                        exited_at,
-                        approved_at
-                    FROM repairs
-                    WHERE LOWER(car_number) = LOWER(%s)
-                      AND status = 'Текширувда'
-                      AND id < %s
-                    ORDER BY id DESC
-                    LIMIT 1
-                """, (car_number, row_id))
-        
-                pending_exit = cursor.fetchone()
-        
-            if not pending_exit:
                 continue
-                
+
             exit_time = to_dt(pending_exit[12]) or to_dt(pending_exit[11])
+            if not exit_time:
+                continue
+
+            if not (start_dt <= exit_time <= end_dt):
+                pending_exit = None
+                open_repairs = []
+                continue
+
             exit_comment = pending_exit[5] or ""
             exit_video_id = pending_exit[7] or ""
             exit_person = pending_exit[9] or pending_exit[8] or ""
-            approve_person = approved_by or entered_by or ""
 
             first_start = None
             if open_repairs:
                 first_start = to_dt(open_repairs[0][11])
 
             duration_text = ""
-            if first_start and exit_time:
+            if first_start:
                 duration_text = calculate_duration(
                     first_start.strftime("%Y-%m-%d %H:%M:%S"),
                     exit_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -1516,39 +1468,53 @@ async def send_history_by_date(message, car, start_date, end_date):
 
             repair_types = ", ".join([r[3] for r in open_repairs if r[3]]) or "Ремонтдан чиқарилди"
 
-            found = True
+            events.append({
+                "time": exit_time,
+                "type": "exit",
+                "row_id": pending_exit[0],
+                "text": (
+                    f"🟢 Ремонтдан чиққан\n\n"
+                    f"🚘 {car_number}\n"
+                    f"🔧 Тури: {car_type}\n"
+                    f"📅 Сана: {exit_time.strftime('%d-%m-%Y %H:%M')}\n"
+                    f"⏳ Ремонт учун кетган вақт: {duration_text}\n"
+                    f"🛠 Ремонт: {repair_types}\n"
+                    f"📌 Статус: тасдиқланди\n"
+                    f"💬 Изоҳ: {exit_comment}\n"
+                    f"👨‍🔧 Чиқарган: {exit_person}\n"
+                    f"👤 Текширувчи: {approved_by}"
+                ),
+                "photo_id": "",
+                "video_id": exit_video_id
+            })
 
-            await message.reply_text(
-                f"🟢 Ремонтдан чиққан\n\n"
-                f"🚘 {car_number}\n"
-                f"🔧 Тури: {car_type}\n"
-                f"📅 Сана: {exit_time.strftime('%d-%m-%Y %H:%M') if exit_time else ''}\n"
-                f"⏳ Ремонт учун кетган вақт: {duration_text}\n"
-                f"🛠 Ремонт: {repair_types}\n"
-                f"📌 Статус: тасдиқланди\n"
-                f"💬 Изоҳ: {exit_comment}\n"
-                f"👨‍🔧 Чиқарган: {exit_person}\n"
-                f"👤 Текширувчи: {approve_person}"
-            )
-
-            if exit_video_id:
-                exit_row_id = pending_exit[0]
-            
-                media_key = f"history_exit_{exit_row_id}"
-            
-                await message.reply_text(
-                    "📎 Видеони кўриш учун:",
-                    reply_markup=view_media_keyboard(media_key)
-                )
-
-            open_repairs = []
             pending_exit = None
+            open_repairs = []
 
-    if not found:
+    events.sort(key=lambda x: x["time"])
+
+    if not events:
         await message.reply_text(
             "Бу вақт оралиғида ремонт историяси топилмади.\n\nБошқа даврни танланг:",
             reply_markup=history_period_keyboard()
         )
+        return
+
+    for item in events:
+        await message.reply_text(item["text"])
+
+        if item["photo_id"] or item["video_id"]:
+            if item["type"] == "enter":
+                media_key = f"history_enter_{item['row_id']}"
+                media_text = "📎 Расм/видеони кўриш учун:"
+            else:
+                media_key = f"history_exit_{item['row_id']}"
+                media_text = "📎 Видеони кўриш учун:"
+
+            await message.reply_text(
+                media_text,
+                reply_markup=view_media_keyboard(media_key)
+            )
 
 async def notify_technadzor_for_check(context, car):
     kirgan_list, chiqqan = get_last_repair_pair(car)
