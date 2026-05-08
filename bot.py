@@ -110,8 +110,11 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 USERS = {
     492894595: {"role": "director", "name": "Jahongir Ganiyev"},
+    1026372827: {"role": "mechanic", "name": "Пармонов Гиёс"},
+    1950294513: {"role": "mechanic", "name": "Холикулов Шехроз"},
     492894594: {"role": "technadzor", "name": "Jahongir Ganiyev"},
     1973869412: {"role": "technadzor", "name": "офис"},
+    444444444: {"role": "slesar", "name": "Слесарь исми"},
 }
 
 SHEET_NAME = "Avtobaza Remont Baza"
@@ -2005,6 +2008,52 @@ async def save_final_data(update_or_query, context, message_obj):
 
     if role != "technadzor":
         context.user_data["firm"] = saved_firm
+
+
+
+
+async def show_driver_confirm(message, context):
+    work_role = context.user_data.get("driver_work_role", "driver")
+
+    role_titles = {
+        "driver": "Ҳайдовчи",
+        "mechanic": "Механик",
+        "zapravshik": "Заправщик",
+    }
+
+    text = (
+        "📋 Маълумотларни текширинг:\n\n"
+        f"👤 Лавозим: {role_titles.get(work_role, work_role)}\n"
+        f"👤 Исм: {context.user_data.get('driver_name', '')}\n"
+        f"👤 Фамилия: {context.user_data.get('driver_surname', '')}\n"
+        f"📞 Телефон: {context.user_data.get('phone', '')}\n"
+    )
+
+    if work_role == "mechanic":
+        text += f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
+
+    if work_role == "driver":
+        text += (
+            f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
+            f"🚛 Техника: {context.user_data.get('driver_car', '')}\n"
+        )
+
+    text += "\nТасдиқлайсизми?"
+
+    await message.reply_text(
+        "✅ Маълумот танланди.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    await message.reply_text(
+        text + "\n\nТанланг:",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Тасдиқлаш", callback_data="confirm_driver"),
+                InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")
+            ]
+        ])
+    )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
