@@ -106,6 +106,12 @@ CREATE TABLE IF NOT EXISTS diesel_transfers (
 
 conn.commit()
 
+cursor.execute("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS work_role TEXT")
+cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS to_driver_id BIGINT")
+cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS receiver_comment TEXT")
+cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP")
+conn.commit()
+
 TOKEN = os.getenv("BOT_TOKEN")
 
 USERS = {
@@ -412,7 +418,36 @@ def get_user(update):
 
 def get_role(update):
     user = get_user(update)
-    return user["role"] if user else None
+    if user:
+        return user["role"]
+
+    try:
+        cursor.execute("""
+            SELECT work_role, status
+            FROM drivers
+            WHERE telegram_id = %s
+            LIMIT 1
+        """, (int(update.effective_user.id),))
+
+        row = cursor.fetchone()
+
+        if not row:
+            return None
+
+        work_role = row[0] or "driver"
+        status = row[1] or ""
+
+        if status != "Тасдиқланди":
+            return None
+
+        if work_role in ["mechanic", "zapravshik"]:
+            return work_role
+
+        return None
+
+    except Exception as e:
+        print("GET ROLE FROM DB ERROR:", e)
+        return None
 
 
 def get_user_name(update):
@@ -469,6 +504,38 @@ def get_driver_status(user_id):
 def get_driver_car(user_id):
     cursor.execute("""
         SELECT car
+        FROM drivers
+        WHERE telegram_id = %s
+        LIMIT 1
+    """, (int(user_id),))
+
+    row = cursor.fetchone()
+
+    if row:
+        return row[0] or ""
+
+    return ""
+
+
+def get_driver_work_role(user_id):
+    cursor.execute("""
+        SELECT work_role
+        FROM drivers
+        WHERE telegram_id = %s
+        LIMIT 1
+    """, (int(user_id),))
+
+    row = cursor.fetchone()
+
+    if row:
+        return row[0] or "driver"
+
+    return "driver"
+
+
+def get_driver_firm(user_id):
+    cursor.execute("""
+        SELECT firm
         FROM drivers
         WHERE telegram_id = %s
         LIMIT 1
@@ -572,9 +639,24 @@ def gas_report_keyboard():
 
 def diesel_report_keyboard():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("⛽ ДИЗЕЛ олиш")],
+        [KeyboardButton("✅ ДИЗЕЛ олишни тасдиқлаш")],
         [KeyboardButton("⛽ ДИЗЕЛ бериш")],
         [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
+def register_role_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("🔧 Механик")],
+        [KeyboardButton("⛽ Заправщик")],
+        [KeyboardButton("🚚 Ҳайдовчи")],
+    ], resize_keyboard=True)
+
+
+def zapravshik_main_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("⛽ ДИЗЕЛ бериш")],
+        [KeyboardButton("📚 Дизел историяси")],
     ], resize_keyboard=True)
 
 
@@ -670,6 +752,57 @@ def diesel_cars_by_firm_keyboard(firm, exclude_car=None):
         keyboard = [[InlineKeyboardButton("❌ Дизел техника топилмади", callback_data="none")]]
 
     return InlineKeyboardMarkup(keyboard)
+
+
+def diesel_pending_confirm_keyboard(driver_car):
+    cursor.execute("""
+        SELECT
+            dt.id,
+            dt.from_car,
+            dt.to_car,
+            dt.firm,
+            dt.created_at,
+            COALESCE(c.car_type, '')
+        FROM diesel_transfers dt
+        LEFT JOIN cars c ON LOWER(c.car_number) = LOWER(dt.from_car)
+        WHERE LOWER(dt.to_car) = LOWER(%s)
+          AND dt.status = 'Қабул қилувчи текширувида'
+        ORDER BY dt.firm ASC, dt.created_at DESC
+    """, (driver_car,))
+
+    rows = cursor.fetchall()
+    keyboard = []
+    current_firm = None
+
+    for transfer_id, from_car, to_car, firm, created_at, car_type in rows:
+        firm = firm or "Фирма номаълум"
+
+        if current_firm != firm:
+            keyboard.append([InlineKeyboardButton(f"🏢 {firm}", callback_data="none")])
+            current_firm = firm
+
+        date_text = created_at.strftime("%d.%m.%y") if created_at else ""
+
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{from_car} | {car_type} | {date_text}",
+                callback_data=f"diesel_receive_detail|{transfer_id}"
+            )
+        ])
+
+    if not keyboard:
+        keyboard = [[InlineKeyboardButton("❌ Тасдиқланмаган дизел маълумоти йўқ", callback_data="none")]]
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+def diesel_receive_action_keyboard(transfer_id):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_receive_accept|{transfer_id}"),
+            InlineKeyboardButton("❌ Рад этиш", callback_data=f"diesel_receive_reject|{transfer_id}")
+        ]
+    ])
 
 
 def gas_give_confirm_keyboard():
@@ -1146,19 +1279,37 @@ def driver_edit_keyboard():
     ])
 
 async def show_driver_confirm(message, context):
+    work_role = context.user_data.get("driver_work_role", "driver")
+
+    role_names = {
+        "driver": "Ҳайдовчи",
+        "mechanic": "Механик",
+        "zapravshik": "Заправщик",
+    }
+
     text = (
         "📋 Маълумотларни текширинг:\n\n"
+        f"👤 Лавозим: {role_names.get(work_role, work_role)}\n"
         f"👤 Исм: {context.user_data.get('driver_name')}\n"
         f"👤 Фамилия: {context.user_data.get('driver_surname')}\n"
         f"📞 Телефон: {context.user_data.get('phone')}\n"
-        f"🏢 Фирма: {context.user_data.get('driver_firm')}\n"
-        f"🚛 Техника: {context.user_data.get('driver_car')}\n\n"
-        "Тасдиқлайсизми?"
     )
+
+    if work_role == "mechanic":
+        text += f"🏢 Фирма: {context.user_data.get('driver_firm')}\n"
+
+    if work_role == "driver":
+        text += (
+            f"🏢 Фирма: {context.user_data.get('driver_firm')}\n"
+            f"🚛 Техника: {context.user_data.get('driver_car')}\n"
+        )
+
+    text += "\nТасдиқлайсизми?"
+
     await message.reply_text(
-        "✅ Техника танланди.",
+        "✅ Маълумотлар танланди.",
         reply_markup=ReplyKeyboardRemove()
-    )    
+    )
 
     await message.reply_text(
         text + "\n\nТанланг:",
@@ -1723,6 +1874,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         elif driver_status == "Тасдиқланди":
+            work_role = get_driver_work_role(update.effective_user.id)
+
+            if work_role == "zapravshik":
+                await update.message.reply_text(
+                    "⛽ Заправщик менюси:",
+                    reply_markup=zapravshik_main_keyboard()
+                )
+                return
+
+            if work_role == "mechanic":
+                await update.message.reply_text(
+                    "🔧 Механик менюси\n\nАввал фирмани танланг:",
+                    reply_markup=firm_keyboard()
+                )
+                return
+
             driver_car = get_driver_car(update.effective_user.id)
             fuel_type = get_car_fuel_type(driver_car)
 
@@ -1736,16 +1903,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         else:
             await update.message.reply_text(
-                "🚚 Ҳайдовчи сифатида рўйхатдан ўтинг:",
-                reply_markup=ReplyKeyboardMarkup(
-                    [[KeyboardButton("🚚 Рўйхатдан ўтиш")]],
-                    resize_keyboard=True
-                )
+                "👤 Ким бўлиб ишлайсиз?",
+                reply_markup=register_role_keyboard()
             )
-            context.user_data["mode"] = "driver_register_start"
+            context.user_data["mode"] = "choose_work_role"
             return
             
-    if role not in ["director", "mechanic", "technadzor", "slesar"]:
+    if role not in ["director", "mechanic", "technadzor", "slesar", "zapravshik"]:
         await deny(update)
         return
 
@@ -1755,6 +1919,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if role == "mechanic":
         await update.message.reply_text("🔧 Механик менюси\n\nАввал фирмани танланг:", reply_markup=firm_keyboard())
+        return
+
+    if role == "zapravshik":
+        await update.message.reply_text("⛽ Заправщик менюси:", reply_markup=zapravshik_main_keyboard())
         return
 
     if role == "slesar":
@@ -1867,6 +2035,78 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
+
+    if mode == "diesel_receive_reject_note":
+        if not is_valid_gas_note(text):
+            await update.message.reply_text("❌ Сабаб нотўғри. Фақат ҳарф ва рақам киритинг.")
+            return
+
+        transfer_id = context.user_data.get("diesel_receive_reject_id")
+
+        cursor.execute("""
+            UPDATE diesel_transfers
+            SET status = %s,
+                receiver_comment = %s,
+                answered_at = NOW()
+            WHERE id = %s
+            RETURNING from_driver_id, to_car, liter
+        """, ("Рад этилди", text, transfer_id))
+
+        row = cursor.fetchone()
+        conn.commit()
+
+        if row:
+            from_driver_id, to_car, liter = row
+            try:
+                await context.bot.send_message(
+                    chat_id=int(from_driver_id),
+                    text=(
+                        "❌ Дизел бериш маълумотингиз рад этилди.\n\n"
+                        f"🚛 Дизел олган техника: {to_car}\n"
+                        f"⛽ Литр: {liter}\n"
+                        f"📝 Сабаб: {text}"
+                    )
+                )
+            except Exception:
+                pass
+
+        driver_car = get_driver_car(update.effective_user.id)
+        fuel_type = get_car_fuel_type(driver_car)
+
+        context.user_data.clear()
+
+        await update.message.reply_text("❌ Дизел олиш рад этилди.")
+        await update.message.reply_text(
+            f"🚚 Ҳайдовчи менюси\n\n"
+            f"🚛 Техника: {driver_car}\n"
+            f"⛽ Ёқилғи тури: {fuel_type}",
+            reply_markup=driver_main_keyboard(fuel_type)
+        )
+        return
+
+    if mode == "choose_work_role":
+        role_map = {
+            "🚚 Ҳайдовчи": "driver",
+            "🔧 Механик": "mechanic",
+            "⛽ Заправщик": "zapravshik",
+        }
+
+        if text not in role_map:
+            await update.message.reply_text(
+                "❌ Қуйидаги тугмалардан бирини танланг:",
+                reply_markup=register_role_keyboard()
+            )
+            return
+
+        context.user_data["driver_work_role"] = role_map[text]
+        context.user_data["mode"] = "driver_name"
+
+        await update.message.reply_text(
+            "🔴 <b>Исмингизни киритинг</b>\n\nМисол: Тешавой",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
 
     if mode == "dieselgive_note":
 
@@ -2101,21 +2341,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if text == "✅ ДИЗЕЛ олишни тасдиқлаш":
+        driver_car = get_driver_car(update.effective_user.id)
+
+        if not driver_car:
+            await update.message.reply_text("❌ Сизга бириктирилган техника топилмади.")
+            return
+
+        context.user_data["mode"] = "diesel_receive_select"
+
+        await update.message.reply_text(
+            "✅ Тасдиқланмаган дизел маълумотлари:",
+            reply_markup=diesel_pending_confirm_keyboard(driver_car)
+        )
+        return
+
     if text == "⛽ ДИЗЕЛ бериш":
-        if context.user_data.get("mode") != "diesel_menu":
+        work_role = get_driver_work_role(update.effective_user.id)
+
+        if context.user_data.get("mode") not in ["diesel_menu", None]:
             await update.message.reply_text("❌ Бу амал фақат дизел менюсида ишлайди.")
             return
-    
+
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
-    
-        if fuel_type.lower() != "дизел":
-            await update.message.reply_text("❌ Дизел бериш фақат дизел техника ҳайдовчилари учун.")
+
+        if work_role != "zapravshik" and fuel_type.lower() != "дизел":
+            await update.message.reply_text("❌ Дизел бериш фақат дизел техника ҳайдовчилари ёки заправщик учун.")
             return
-    
+
         context.user_data["mode"] = "dieselgive_firm"
-        context.user_data["dieselgive_from_car"] = driver_car
-    
+        context.user_data["dieselgive_from_car"] = driver_car if work_role != "zapravshik" else "Заправщик"
+
         await update.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
             reply_markup=diesel_firm_keyboard()
@@ -2318,6 +2575,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode == "driver_firm":
         context.user_data["driver_firm"] = text
+
+        if context.user_data.get("driver_work_role") == "mechanic":
+            context.user_data["driver_car"] = ""
+            context.user_data["mode"] = "driver_confirm"
+            await show_driver_confirm(update.message, context)
+            return
+
         context.user_data["mode"] = "driver_car"
 
         await update.message.reply_text(
@@ -2378,7 +2642,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     role = get_role(update)
 
-    if role not in ["director", "mechanic", "technadzor", "slesar"] and not str(context.user_data.get("mode", "")).startswith("driver"):
+    if role not in ["director", "mechanic", "technadzor", "slesar", "zapravshik"] and not str(context.user_data.get("mode", "")).startswith("driver"):
         driver_status = get_driver_status(update.effective_user.id)
 
         if driver_status == "Текширувда":
@@ -3249,7 +3513,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             liter,
             note,
             video_id,
-            "Тасдиқланди"
+            "Қабул қилувчи текширувида"
         ))
 
         conn.commit()
@@ -3612,7 +3876,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.get("driver_firm", ""),
             context.user_data.get("driver_car", ""),
             "Текширувда",
-            now_text()
+            now_text(),
+            context.user_data.get("driver_work_role", "driver")
         ])
         
         cursor.execute("""
@@ -3623,9 +3888,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 phone,
                 firm,
                 car,
-                status
+                status,
+                work_role
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (telegram_id)
             DO UPDATE SET
                 name = EXCLUDED.name,
@@ -3633,7 +3899,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 phone = EXCLUDED.phone,
                 firm = EXCLUDED.firm,
                 car = EXCLUDED.car,
-                status = EXCLUDED.status
+                status = EXCLUDED.status,
+                work_role = EXCLUDED.work_role
         """, (
             user_id,
             context.user_data.get("driver_name", ""),
@@ -3641,7 +3908,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.get("phone", ""),
             context.user_data.get("driver_firm", ""),
             context.user_data.get("driver_car", ""),
-            "Текширувда"
+            "Текширувда",
+            context.user_data.get("driver_work_role", "driver")
         ))
         
         conn.commit()
@@ -3797,7 +4065,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     role = get_role(update)
 
-    if role not in ["director", "mechanic", "technadzor", "slesar"]:
+    if role not in ["director", "mechanic", "technadzor", "slesar", "zapravshik"]:
         await query.message.reply_text("❌ Сизга рухсат йўқ")
         return
 
@@ -4163,7 +4431,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     role = get_role(update)
 
-    if role not in ["director", "mechanic", "technadzor", "slesar"]:
+    if role not in ["director", "mechanic", "technadzor", "slesar", "zapravshik"]:
         await deny(update)
         return
        
@@ -4398,7 +4666,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     role = get_role(update)
 
-    if role not in ["director", "mechanic", "technadzor", "slesar"]:
+    if role not in ["director", "mechanic", "technadzor", "slesar", "zapravshik"]:
         await deny(update)
         return
 
