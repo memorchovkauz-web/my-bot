@@ -1572,9 +1572,18 @@ def diesel_receiver_after_view_keyboard(transfer_id):
 
 def diesel_rejected_sender_keyboard(transfer_id):
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👁 Кўриш", callback_data=f"diesel_rejected_view|{transfer_id}")],
+        [InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_rejected_resend|{transfer_id}")],
         [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_rejected_edit|{transfer_id}")],
-        [InlineKeyboardButton("✅ Қайта юбориш", callback_data=f"diesel_rejected_resend|{transfer_id}")],
-        [InlineKeyboardButton("❌ Бекор қилиш", callback_data=f"diesel_rejected_cancel|{transfer_id}")]
+        [InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_rejected_cancel|{transfer_id}")]
+    ])
+
+
+def diesel_rejected_after_view_keyboard(transfer_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_rejected_resend|{transfer_id}")],
+        [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_rejected_edit|{transfer_id}")],
+        [InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_rejected_cancel|{transfer_id}")]
     ])
 
 
@@ -1605,6 +1614,7 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
         f"🏢 Фирма: {firm}\n"
         f"🚛 Дизел берган техника: {from_car} — {from_driver_name}\n"
         f"🚛 Дизел олган техника: {to_car} — {to_driver_name}\n"
+        f"📝 Изоҳ: {note}\n"
         f"⛽ Литр: {liter}\n\n"
         "Маълумотни тасдиқлайсизми?"
     )
@@ -1642,26 +1652,39 @@ async def notify_diesel_sender_confirmed(context, transfer_id):
 
 async def notify_diesel_sender_rejected(context, transfer_id, reason):
     cursor.execute("""
-        SELECT from_driver_id, from_car, to_car, liter
+        SELECT
+            from_driver_id,
+            from_car,
+            to_car,
+            firm,
+            liter,
+            note,
+            created_at
         FROM diesel_transfers
         WHERE id = %s
     """, (transfer_id,))
 
     row = cursor.fetchone()
+
     if not row:
         return
 
-    from_driver_id, from_car, to_car, liter = row
+    from_driver_id, from_car, to_car, firm, liter, note, created_at = row
+
+    created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
     await context.bot.send_message(
         chat_id=int(from_driver_id),
         text=(
-            "❌ Дизел бериш маълумотингиз рад этилди."
-            f"🚛 Берган техника: {from_car}"
-            f"🚛 Олган техника: {to_car}"
-            f"⛽ Литр: {liter}"
-            f"📝 Сабаб: {reason}"
-            "Кейинги амални танланг:"
+            "❌ ДИЗЕЛ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
+            f"🕒 Вақт: {created_text}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"🚛 Дизел берган техника: {from_car}\n"
+            f"🚛 Дизел олган техника: {to_car}\n"
+            f"⛽ Литр: {liter}\n"
+            f"📝 Изоҳ: {note}\n\n"
+            f"❗ Рад сабаби: {reason}\n\n"
+            "Маълумотни нима қиласиз?"
         ),
         reply_markup=diesel_rejected_sender_keyboard(transfer_id)
     )
@@ -1724,6 +1747,7 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
         f"🏢 Фирма: {firm}\n"
         f"🚛 Дизел берган: {from_car} — {from_driver_name}\n"
         f"🚛 Дизел олган: {to_car} — {to_driver_name}\n"
+        f"📝 Изоҳ: {note}\n"
         f"⛽ Литр: {liter}\n\n"
         "Маълумотни тасдиқлайсизми?"
     )
@@ -4068,6 +4092,70 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Рад этиш сабабини ёзинг.\n\nФақат текст киритинг.",
             reply_markup=ReplyKeyboardRemove()
         )
+        return
+
+    if data.startswith("diesel_rejected_view|"):
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT
+                from_driver_id,
+                from_car,
+                to_car,
+                firm,
+                liter,
+                note,
+                video_id,
+                receiver_comment,
+                created_at
+            FROM diesel_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        from_driver_id, from_car, to_car, firm, liter, note, video_id, receiver_comment, created_at = row
+
+        if int(update.effective_user.id) != int(from_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+        reject_reason = receiver_comment or "Кўрсатилмаган"
+
+        text = (
+            "❌ ДИЗЕЛ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
+            f"🕒 Вақт: {created_text}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"🚛 Дизел берган техника: {from_car}\n"
+            f"🚛 Дизел олган техника: {to_car}\n"
+            f"⛽ Литр: {liter}\n"
+            f"📝 Изоҳ: {note}\n\n"
+            f"❗ Рад сабаби: {reject_reason}\n\n"
+            "Маълумотни нима қиласиз?"
+        )
+
+        if video_id:
+            await safe_send_video(
+                context.bot,
+                query.message.chat_id,
+                video_id
+            )
+
+        await query.message.reply_text(
+            text,
+            reply_markup=diesel_rejected_after_view_keyboard(transfer_id)
+        )
+
         return
 
     if data.startswith("diesel_rejected_cancel|"):
