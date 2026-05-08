@@ -576,6 +576,34 @@ def get_user_ids_by_role(role_name):
 async def deny(update):
     await update.effective_message.reply_text("❌ Сизга рухсат йўқ")
 
+async def clear_inline_keyboards(update, context):
+    chat_id = update.effective_chat.id
+    message_ids = context.user_data.get("inline_message_ids", [])
+
+    for message_id in message_ids:
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=None
+            )
+        except Exception:
+            pass
+
+    context.user_data["inline_message_ids"] = []
+
+
+async def send_tracked_inline(message, context, text, reply_markup):
+    sent_message = await message.reply_text(
+        text,
+        reply_markup=reply_markup
+    )
+
+    context.user_data.setdefault("inline_message_ids", [])
+    context.user_data["inline_message_ids"].append(sent_message.message_id)
+
+    return sent_message
+
 
 def firm_keyboard():
     return ReplyKeyboardMarkup(
@@ -2103,9 +2131,16 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await clear_inline_keyboards(update, context)
+
     context.user_data.clear()
     context.user_data["history"] = []
 
+    await update.message.reply_text(
+        "🔄 Бош менюга қайтилди.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    
     if update.message:
         await update.message.reply_text(
             "🔄 Меню янгиланмоқда...",
