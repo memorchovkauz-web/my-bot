@@ -573,6 +573,10 @@ def get_user_ids_by_role(role_name):
     ]
 
 
+async def deny(update):
+    await update.effective_message.reply_text("❌ Сизга рухсат йўқ")
+
+
 def firm_keyboard():
     return ReplyKeyboardMarkup(
         [[KeyboardButton(name)] for name in FIRM_NAMES],
@@ -2093,22 +2097,51 @@ async def notify_technadzor_for_check(context, car):
         except Exception:
             pass
             
+
+async def clear_inline_keyboards(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id if update.effective_chat else None
+
+    if not chat_id:
+        return
+
+    last_messages = context.user_data.get("last_inline_message_ids", [])
+
+    for message_id in last_messages:
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=None
+            )
+        except Exception:
+            pass
+
+    context.user_data["last_inline_message_ids"] = []
+
+
+async def send_inline_message(message, context, text, reply_markup=None, **kwargs):
+    sent_message = await message.reply_text(
+        text,
+        reply_markup=reply_markup,
+        **kwargs
+    )
+
+    if reply_markup is not None:
+        context.user_data.setdefault("last_inline_message_ids", [])
+        context.user_data["last_inline_message_ids"].append(sent_message.message_id)
+
+    return sent_message
+
+
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Сизнинг ID: {update.effective_user.id}"
     )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await clear_inline_keyboards(update, context)
-
     context.user_data.clear()
     context.user_data["history"] = []
 
-    await update.message.reply_text(
-        "🔄 Бош менюга қайтилди.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    
     if update.message:
         await update.message.reply_text(
             "🔄 Меню янгиланмоқда...",
