@@ -4065,7 +4065,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["diesel_reject_transfer_id"] = transfer_id
 
         await query.message.reply_text(
-            "❌ Рад этиш сабабини ёзинг.\\n\\nФақат текст киритинг.",
+            "❌ Рад этиш сабабини ёзинг.\n\nФақат текст киритинг.",
             reply_markup=ReplyKeyboardRemove()
         )
         return
