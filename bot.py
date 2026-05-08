@@ -607,6 +607,11 @@ def back_keyboard():
         [KeyboardButton("⬅️ Орқага")]
     ], resize_keyboard=True)
 
+def only_back_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("⬅️ Орқага")]
+    ], resize_keyboard=True)
+
 def phone_keyboard():
     return ReplyKeyboardMarkup(
         [[KeyboardButton("📞 Телефонни юбориш", request_contact=True)]],
@@ -2341,6 +2346,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if text == "⬅️ Орқага" and mode == "diesel_receive_select":
+        context.user_data["mode"] = "diesel_menu"
+    
+        await update.message.reply_text(
+            "⛽ Дизел ҳисоботи бўлими\n\nАмални танланг:",
+            reply_markup=diesel_report_keyboard()
+        )
+        return
+
     if text == "✅ ДИЗЕЛ олишни тасдиқлаш":
         driver_car = get_driver_car(update.effective_user.id)
 
@@ -2349,6 +2363,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         context.user_data["mode"] = "diesel_receive_select"
+
+        await update.message.reply_text(
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=only_back_keyboard()
+        )
 
         await update.message.reply_text(
             "✅ Тасдиқланмаган дизел маълумотлари:",
