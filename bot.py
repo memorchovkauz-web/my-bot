@@ -1632,13 +1632,9 @@ async def notify_diesel_sender_confirmed(context, transfer_id):
     await context.bot.send_message(
         chat_id=int(from_driver_id),
         text=(
-            "✅ Дизел бериш маълумотингиз тасдиқланди.
-
-"
-            f"🚛 Берган техника: {from_car}
-"
-            f"🚛 Олган техника: {to_car}
-"
+            "✅ Дизел бериш маълумотингиз тасдиқланди."
+            f"🚛 Берган техника: {from_car}"
+            f"🚛 Олган техника: {to_car}"
             f"⛽ Литр: {liter}"
         )
     )
