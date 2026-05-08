@@ -1722,8 +1722,8 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
         "⛽ Сизга ДИЗЕЛ берилди\n\n"
         f"🕒 Вақт: {created_text}\n"
         f"🏢 Фирма: {firm}\n"
-        f"🚛 Дизел берган техника: {from_car} — {from_driver_name}\n"
-        f"🚛 Дизел олган техника: {to_car} — {to_driver_name}\n"
+        f"🚛 Дизел берган: {from_car} — {from_driver_name}\n"
+        f"🚛 Дизел олган: {to_car} — {to_driver_name}\n"
         f"⛽ Литр: {liter}\n\n"
         "Маълумотни тасдиқлайсизми?"
     )
@@ -1752,9 +1752,9 @@ async def notify_diesel_sender_confirmed(context, transfer_id):
     await context.bot.send_message(
         chat_id=int(from_driver_id),
         text=(
-            "✅ Дизел бериш маълумотингиз тасдиқланди.\\n\\n"
-            f"🚛 Берган техника: {from_car}\\n"
-            f"🚛 Олган техника: {to_car}\\n"
+            "✅ Дизел бериш маълумотингиз тасдиқланди.\n\\n"
+            f"🚛 Берган техника: {from_car}\n"
+            f"🚛 Олган техника: {to_car}\n"
             f"⛽ Литр: {liter}"
         )
     )
