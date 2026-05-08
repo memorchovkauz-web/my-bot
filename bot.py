@@ -527,6 +527,16 @@ def get_driver_work_role(user_id):
     return "driver"
 
 
+def work_role_title(work_role):
+    titles = {
+        "driver": "Ҳайдовчи",
+        "mechanic": "Механик",
+        "zapravshik": "Заправщик",
+    }
+
+    return titles.get(work_role or "driver", work_role or "Ҳайдовчи")
+
+
 def get_driver_firm(user_id):
     cursor.execute("""
         SELECT firm
@@ -1871,6 +1881,12 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["history"] = []
+
+    if update.message:
+        await update.message.reply_text(
+            "🔄 Меню янгиланмоқда...",
+            reply_markup=ReplyKeyboardRemove()
+        )
     
     role = get_role(update)
     driver_status = get_driver_status(update.effective_user.id)
@@ -2242,6 +2258,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+    if text == "⬅️ Орқага" and mode in ["diesel_receive_select", "diesel_receive_reject_note"]:
+        context.user_data["mode"] = "diesel_menu"
+
+        await update.message.reply_text(
+            "⛽ Дизел ҳисоботи бўлими\n\nАмални танланг:",
+            reply_markup=diesel_report_keyboard()
+        )
+        return
+
     if text == "⬅️ Орқага" and mode in ["fuel_menu", "gasgive_firm", "gasgive_car", "gasgive_note", "gasgive_video", "gasgive_confirm"]:
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
@@ -2361,6 +2386,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         context.user_data["mode"] = "diesel_receive_select"
+
+        await update.message.reply_text(
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=back_keyboard()
+        )
 
         await update.message.reply_text(
             "✅ Тасдиқланмаган дизел маълумотлари:",
@@ -3854,14 +3884,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
         try:
+            approved_role = get_driver_work_role(driver_id)
+
+            if approved_role == "mechanic":
+                approved_text = "✅ Механик сифатида маълумотларингиз тасдиқланди.\n/start босинг."
+            elif approved_role == "zapravshik":
+                approved_text = "✅ Заправщик сифатида маълумотларингиз тасдиқланди.\n/start босинг."
+            else:
+                approved_text = "✅ Ҳайдовчи сифатида маълумотларингиз тасдиқланди.\n/start босинг."
+
             await context.bot.send_message(
                 chat_id=int(driver_id),
-                text="✅ Маълумотларингиз тасдиқланди.\nБотдан фойдаланишингиз мумкин."
+                text=approved_text
             )
         except Exception:
             pass
 
-        await query.message.reply_text("✅ Ҳайдовчи тасдиқланди")
+        await query.message.reply_text("✅ Ходим тасдиқланди")
         return
 
     if data.startswith("reject_driver|"):
@@ -3883,7 +3922,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        await query.message.reply_text("❌ Ҳайдовчи рад этилди")
+        await query.message.reply_text("❌ Ходим рад этилди")
         return
 
     if data == "confirm_driver":
@@ -3942,17 +3981,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         
         for tech_id in get_user_ids_by_role("technadzor"):
             try:
+                work_role = context.user_data.get("driver_work_role", "driver")
+                employee_text = (
+                    "👤 Янги ходим рўйхатдан ўтди:\n\n"
+                    f"👤 Лавозим: {work_role_title(work_role)}\n"
+                    f"👤 Исм: {context.user_data.get('driver_name', '')}\n"
+                    f"👤 Фамилия: {context.user_data.get('driver_surname', '')}\n"
+                    f"📞 Телефон: {context.user_data.get('phone', '')}\n"
+                )
+
+                if work_role == "mechanic":
+                    employee_text += f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
+
+                if work_role == "driver":
+                    employee_text += (
+                        f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
+                        f"🚛 Техника: {context.user_data.get('driver_car', '')}\n"
+                    )
+
+                employee_text += "\nТасдиқлайсизми?"
+
                 await context.bot.send_message(
                     chat_id=tech_id,
-                    text=(
-                        "🚚 Янги ҳайдовчи рўйхатдан ўтди:\n\n"
-                        f"👤 Исм: {context.user_data.get('driver_name', '')}\n"
-                        f"👤 Фамилия: {context.user_data.get('driver_surname', '')}\n"
-                        f"📞 Телефон: {context.user_data.get('phone', '')}\n"
-                        f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
-                        f"🚛 Техника: {context.user_data.get('driver_car', '')}\n\n"
-                        "Тасдиқлайсизми?"
-                    ),
+                    text=employee_text,
                     reply_markup=InlineKeyboardMarkup([
                         [
                             InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"approve_driver|{user_id}"),
