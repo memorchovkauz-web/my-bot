@@ -110,8 +110,11 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 USERS = {
     492894595: {"role": "director", "name": "Jahongir Ganiyev"},
+    1026372827: {"role": "mechanic", "name": "Пармонов Гиёс"},
+    1950294513: {"role": "mechanic", "name": "Холикулов Шехроз"},
     492894594: {"role": "technadzor", "name": "Jahongir Ganiyev"},
     1973869412: {"role": "technadzor", "name": "офис"},
+    444444444: {"role": "slesar", "name": "Слесарь исми"},
 }
 
 SHEET_NAME = "Avtobaza Remont Baza"
@@ -1296,50 +1299,6 @@ def register_edit_keyboard(context):
         buttons.append([InlineKeyboardButton("🚛 Техника", callback_data="driver_edit|car")])
 
     return InlineKeyboardMarkup(buttons)
-
-async def show_driver_confirm(message, context):
-    work_role = context.user_data.get("driver_work_role", "driver")
-
-    role_names = {
-        "driver": "Ҳайдовчи",
-        "mechanic": "Механик",
-        "zapravshik": "Заправщик",
-    }
-
-    text = (
-        "📋 Маълумотларни текширинг:\n\n"
-        f"👤 Лавозим: {role_names.get(work_role, work_role)}\n"
-        f"👤 Исм: {context.user_data.get('driver_name')}\n"
-        f"👤 Фамилия: {context.user_data.get('driver_surname')}\n"
-        f"📞 Телефон: {context.user_data.get('phone')}\n"
-    )
-
-    if work_role == "mechanic":
-        text += f"🏢 Фирма: {context.user_data.get('driver_firm')}\n"
-
-    if work_role == "driver":
-        text += (
-            f"🏢 Фирма: {context.user_data.get('driver_firm')}\n"
-            f"🚛 Техника: {context.user_data.get('driver_car')}\n"
-        )
-
-    text += "\nТасдиқлайсизми?"
-
-    await message.reply_text(
-        "✅ Маълумотлар танланди.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-    await message.reply_text(
-        text + "\n\nТанланг:",
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ Тасдиқлаш", callback_data="confirm_driver"),
-                InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="edit_driver")
-            ]
-        ])
-    )
-
 
 def car_buttons_by_firm_and_status(firm, status_filter):
     keyboard = []
@@ -2591,6 +2550,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["phone"] = phone
 
         if mode == "driver_phone_edit":
+            context.user_data["mode"] = "driver_confirm"
+            await show_driver_confirm(update.message, context)
+            return
+
+        if context.user_data.get("driver_work_role") == "zapravshik":
+            context.user_data["driver_firm"] = ""
+            context.user_data["driver_car"] = ""
             context.user_data["mode"] = "driver_confirm"
             await show_driver_confirm(update.message, context)
             return
@@ -3930,6 +3896,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         user_id = update.effective_user.id
 
+        if context.user_data.get("driver_work_role") == "zapravshik":
+            context.user_data["driver_firm"] = ""
+            context.user_data["driver_car"] = ""
+
         drivers_ws.append_row([
             user_id,
             context.user_data.get("driver_name", ""),
@@ -4066,6 +4036,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if field == "firm":
+            if context.user_data.get("driver_work_role") == "zapravshik":
+                await query.message.reply_text(
+                    "❌ Заправщик учун фирма танлаш керак эмас.",
+                    reply_markup=register_edit_keyboard(context)
+                )
+                return
+
             if context.user_data.get("driver_work_role") == "mechanic":
                 context.user_data["mode"] = "driver_edit_firm_mechanic"
             else:
