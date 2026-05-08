@@ -1719,12 +1719,12 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
     message_text = (
-        "⛽ Сизга ДИЗЕЛ берилди\\n\\n"
-        f"🕒 Вақт: {created_text}\\n"
-        f"🏢 Фирма: {firm}\\n"
-        f"🚛 Дизел берган техника: {from_car} — {from_driver_name}\\n"
-        f"🚛 Дизел олган техника: {to_car} — {to_driver_name}\\n"
-        f"⛽ Литр: {liter}\\n\\n"
+        "⛽ Сизга ДИЗЕЛ берилди\n\n"
+        f"🕒 Вақт: {created_text}\n"
+        f"🏢 Фирма: {firm}\n"
+        f"🚛 Дизел берган техника: {from_car} — {from_driver_name}\n"
+        f"🚛 Дизел олган техника: {to_car} — {to_driver_name}\n"
+        f"⛽ Литр: {liter}\n\n"
         "Маълумотни тасдиқлайсизми?"
     )
 
