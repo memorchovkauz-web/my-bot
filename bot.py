@@ -106,12 +106,6 @@ CREATE TABLE IF NOT EXISTS diesel_transfers (
 
 conn.commit()
 
-cursor.execute("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS work_role TEXT")
-cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS to_driver_id BIGINT")
-cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS receiver_comment TEXT")
-cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP")
-conn.commit()
-
 TOKEN = os.getenv("BOT_TOKEN")
 
 USERS = {
