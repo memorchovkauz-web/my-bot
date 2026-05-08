@@ -3283,20 +3283,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=diesel_report_keyboard()
         )
 
-        driver_car = get_driver_car(query.from_user.id)
-        fuel_type = get_car_fuel_type(driver_car)
-        
-        context.user_data.clear()
-        
-        await query.message.reply_text(
-            f"🚚 Ҳайдовчи менюси\n\n"
-            f"🚛 Техника: {driver_car}\n"
-            f"⛽ Ёқилғи тури: {fuel_type}",
-            reply_markup=driver_main_keyboard(fuel_type)
-        )
-        
-        return
-
         context.user_data.clear()
         return
 
