@@ -3972,13 +3972,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
         text = (
-            "⛽ ДИЗЕЛ МАЪЛУМОТИ\\n\\n"
-            f"🕒 Вақт: {created_text}\\n"
-            f"🏢 Фирма: {firm}\\n"
-            f"🚛 Дизел берган техника: {from_car}\\n"
-            f"🚛 Дизел олган техника: {to_car}\\n"
-            f"⛽ Литр: {liter}\\n"
-            f"📝 Изоҳ: {note}\\n"
+            "⛽ ДИЗЕЛ МАЪЛУМОТИ\n\n"
+            f"🕒 Вақт: {created_text}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"🚛 Дизел берган техника: {from_car}\n"
+            f"🚛 Дизел олган техника: {to_car}\n"
+            f"⛽ Литр: {liter}\n"
+            f"📝 Изоҳ: {note}\n"
         )
 
         if video_id:
