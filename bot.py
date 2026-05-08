@@ -110,11 +110,8 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 USERS = {
     492894595: {"role": "director", "name": "Jahongir Ganiyev"},
-    1026372827: {"role": "mechanic", "name": "Пармонов Гиёс"},
-    1950294513: {"role": "mechanic", "name": "Холикулов Шехроз"},
     492894594: {"role": "technadzor", "name": "Jahongir Ganiyev"},
     1973869412: {"role": "technadzor", "name": "офис"},
-    444444444: {"role": "slesar", "name": "Слесарь исми"},
 }
 
 SHEET_NAME = "Avtobaza Remont Baza"
