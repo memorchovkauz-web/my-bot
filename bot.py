@@ -106,6 +106,12 @@ CREATE TABLE IF NOT EXISTS diesel_transfers (
 
 conn.commit()
 
+cursor.execute("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS work_role TEXT")
+cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS to_driver_id BIGINT")
+cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS receiver_comment TEXT")
+cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP")
+conn.commit()
+
 TOKEN = os.getenv("BOT_TOKEN")
 
 USERS = {
@@ -597,11 +603,6 @@ def repair_type_keyboard():
 
 
 def back_keyboard():
-    return ReplyKeyboardMarkup([
-        [KeyboardButton("⬅️ Орқага")]
-    ], resize_keyboard=True)
-
-def only_back_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("⬅️ Орқага")]
     ], resize_keyboard=True)
@@ -1276,6 +1277,24 @@ def driver_edit_keyboard():
         [InlineKeyboardButton("🏢 Фирма", callback_data="driver_edit|firm")],
         [InlineKeyboardButton("🚛 Техника", callback_data="driver_edit|car")],
     ])
+
+
+def register_edit_keyboard(context):
+    work_role = context.user_data.get("driver_work_role", "driver")
+
+    buttons = [
+        [InlineKeyboardButton("👤 Исм", callback_data="driver_edit|name")],
+        [InlineKeyboardButton("👤 Фамилия", callback_data="driver_edit|surname")],
+        [InlineKeyboardButton("📞 Телефон", callback_data="driver_edit|phone")],
+    ]
+
+    if work_role in ["driver", "mechanic"]:
+        buttons.append([InlineKeyboardButton("🏢 Фирма", callback_data="driver_edit|firm")])
+
+    if work_role == "driver":
+        buttons.append([InlineKeyboardButton("🚛 Техника", callback_data="driver_edit|car")])
+
+    return InlineKeyboardMarkup(buttons)
 
 async def show_driver_confirm(message, context):
     work_role = context.user_data.get("driver_work_role", "driver")
@@ -2340,15 +2359,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "⬅️ Орқага" and mode == "diesel_receive_select":
-        context.user_data["mode"] = "diesel_menu"
-    
-        await update.message.reply_text(
-            "⛽ Дизел ҳисоботи бўлими\n\nАмални танланг:",
-            reply_markup=diesel_report_keyboard()
-        )
-        return
-
     if text == "✅ ДИЗЕЛ олишни тасдиқлаш":
         driver_car = get_driver_car(update.effective_user.id)
 
@@ -2357,11 +2367,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         context.user_data["mode"] = "diesel_receive_select"
-
-        await update.message.reply_text(
-            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
-            reply_markup=only_back_keyboard()
-        )
 
         await update.message.reply_text(
             "✅ Тасдиқланмаган дизел маълумотлари:",
@@ -2608,8 +2613,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if mode == "driver_edit_firm_mechanic":
+        context.user_data["driver_firm"] = text
+        context.user_data["driver_car"] = ""
+        context.user_data["mode"] = "driver_confirm"
+
+        await show_driver_confirm(update.message, context)
+        return
+
     if mode == "driver_edit_firm":
         context.user_data["driver_firm"] = text
+
+        if context.user_data.get("driver_work_role") == "mechanic":
+            context.user_data["driver_car"] = ""
+            context.user_data["mode"] = "driver_confirm"
+            await show_driver_confirm(update.message, context)
+            return
         context.user_data["driver_car"] = ""
         context.user_data["mode"] = "driver_edit_car"
 
@@ -3966,7 +3985,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "✏️ Қайси маълумотни таҳрирлайсиз?",
-            reply_markup=driver_edit_keyboard()
+            reply_markup=register_edit_keyboard(context)
         )
         return
 
@@ -4005,7 +4024,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if field == "firm":
-            context.user_data["mode"] = "driver_edit_firm"
+            if context.user_data.get("driver_work_role") == "mechanic":
+                context.user_data["mode"] = "driver_edit_firm_mechanic"
+            else:
+                context.user_data["mode"] = "driver_edit_firm"
+
             await query.message.reply_text(
                 "🏢 Янги фирмани танланг:",
                 reply_markup=firm_keyboard()
@@ -4013,6 +4036,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if field == "car":
+            if context.user_data.get("driver_work_role") != "driver":
+                await query.message.reply_text(
+                    "❌ Бу лавозим учун техника таҳрирлаш керак эмас.",
+                    reply_markup=register_edit_keyboard(context)
+                )
+                return
+
             firm = context.user_data.get("driver_firm")
             context.user_data["mode"] = "driver_edit_car"
             await query.message.reply_text(
