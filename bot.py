@@ -596,9 +596,138 @@ def technadzor_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🔧 Ремонтга қўшиш")],
         [KeyboardButton("☑️ Ремонтдан чиқишини тасдиқлаш")],
-        [KeyboardButton("🚚 Ҳайдовчилар")],
+        [KeyboardButton("👥 Ходимлар")],
         [KeyboardButton("📚 История")],
     ], resize_keyboard=True)
+
+def technadzor_staff_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚚 Ҳайдовчилар", callback_data="tz_staff|drivers")],
+        [InlineKeyboardButton("🔧 Механиклар", callback_data="tz_staff|mechanics")],
+        [InlineKeyboardButton("⛽ Заправщик", callback_data="tz_staff|zapravshik")],
+    ])
+
+
+def technadzor_staff_back_keyboard(back_to="staff_menu"):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Орқага", callback_data=f"tz_staff_back|{back_to}")]
+    ])
+
+
+def technadzor_staff_firms_keyboard(staff_type):
+    role_map = {
+        "drivers": "driver",
+        "mechanics": "mechanic",
+    }
+    work_role = role_map.get(staff_type, "driver")
+
+    try:
+        cursor.execute("""
+            SELECT DISTINCT firm
+            FROM drivers
+            WHERE COALESCE(work_role, 'driver') = %s
+              AND status = 'Тасдиқланди'
+              AND COALESCE(firm, '') <> ''
+            ORDER BY firm
+        """, (work_role,))
+        firms = [row[0] for row in cursor.fetchall()]
+    except Exception as e:
+        print("TECHNADZOR STAFF FIRMS ERROR:", e)
+        firms = []
+
+    if not firms:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Маълумот йўқ", callback_data="none")],
+            [InlineKeyboardButton("⬅️ Орқага", callback_data="tz_staff_back|staff_menu")]
+        ])
+
+    buttons = [[InlineKeyboardButton(firm, callback_data=f"tz_staff_firm|{staff_type}|{firm}")] for firm in firms]
+    buttons.append([InlineKeyboardButton("⬅️ Орқага", callback_data="tz_staff_back|staff_menu")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def get_car_type_by_number(car_number):
+    if not car_number:
+        return ""
+
+    try:
+        cursor.execute("""
+            SELECT car_type
+            FROM cars
+            WHERE LOWER(car_number) = LOWER(%s)
+            LIMIT 1
+        """, (car_number,))
+        row = cursor.fetchone()
+        if row:
+            return row[0] or ""
+    except Exception as e:
+        print("GET CAR TYPE ERROR:", e)
+
+    return ""
+
+
+def technadzor_staff_list_text(staff_type, firm=None):
+    role_map = {
+        "drivers": "driver",
+        "mechanics": "mechanic",
+        "zapravshik": "zapravshik",
+    }
+    title_map = {
+        "drivers": "🚚 Ҳайдовчилар",
+        "mechanics": "🔧 Механиклар",
+        "zapravshik": "⛽ Заправщиклар",
+    }
+    work_role = role_map.get(staff_type, "driver")
+    title = title_map.get(staff_type, "👥 Ходимлар")
+
+    params = [work_role]
+    firm_filter = ""
+    if firm:
+        firm_filter = "AND firm = %s"
+        params.append(firm)
+
+    try:
+        cursor.execute(f"""
+            SELECT name, surname, firm, car
+            FROM drivers
+            WHERE COALESCE(work_role, 'driver') = %s
+              AND status = 'Тасдиқланди'
+              {firm_filter}
+            ORDER BY surname, name
+        """, tuple(params))
+        rows = cursor.fetchall()
+    except Exception as e:
+        print("TECHNADZOR STAFF LIST ERROR:", e)
+        rows = []
+
+    if firm:
+        text = f"{title}\n🏢 {firm}\n\n"
+    else:
+        text = f"{title}\n\n"
+
+    if not rows:
+        return text + "Маълумот топилмади."
+
+    lines = []
+    for i, row in enumerate(rows, 1):
+        name = row[0] or ""
+        surname = row[1] or ""
+        car = row[3] or ""
+        full_name = f"{surname} {name}".strip() or "Номаълум"
+
+        if staff_type == "drivers":
+            short_name = f"{surname} {name[:1]}.".strip() if name else (surname or "Номаълум")
+            car_type = get_car_type_by_number(car)
+            details = " / ".join([x for x in [short_name, car, car_type] if x])
+        elif staff_type == "mechanics":
+            details = full_name
+        else:
+            firm_name = row[2] or ""
+            details = " / ".join([x for x in [full_name, firm_name] if x])
+
+        lines.append(f"{i}. {details}")
+
+    return text + "\n".join(lines)
 
 def repair_type_keyboard():
     return ReplyKeyboardMarkup(
@@ -3850,11 +3979,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
             return
 
-        if text == "🚚 Ҳайдовчилар":
-            await update.message.reply_text(
-                "🚚 Ҳайдовчилар бўлими ҳозирча тайёрланмоқда.",
-                reply_markup=technadzor_keyboard()
+        if text == "👥 Ходимлар":
+            context.user_data["mode"] = "technadzor_staff_menu"
+            msg = await update.message.reply_text(
+                "👥 Ходимлар менюси",
+                reply_markup=technadzor_staff_menu_keyboard()
             )
+            context.user_data["technadzor_staff_message_id"] = msg.message_id
             return
 
         if text == "📚 История":
@@ -4008,6 +4139,67 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         await query.answer("Бу эски кнопка. /start дан кейин янги менюдан фойдаланинг.", show_alert=True)
         return
+
+    if data == "tz_staff|drivers":
+        await query.edit_message_text(
+            "🚚 Ҳайдовчилар\n\nФирмани танланг:",
+            reply_markup=technadzor_staff_firms_keyboard("drivers")
+        )
+        return
+
+    if data == "tz_staff|mechanics":
+        await query.edit_message_text(
+            "🔧 Механиклар\n\nФирмани танланг:",
+            reply_markup=technadzor_staff_firms_keyboard("mechanics")
+        )
+        return
+
+    if data == "tz_staff|zapravshik":
+        await query.edit_message_text(
+            technadzor_staff_list_text("zapravshik"),
+            reply_markup=technadzor_staff_back_keyboard("staff_menu")
+        )
+        return
+
+    if data.startswith("tz_staff_firm|"):
+        parts = data.split("|", 2)
+        if len(parts) != 3:
+            await query.answer("Маълумот нотўғри.", show_alert=True)
+            return
+
+        staff_type = parts[1]
+        firm = parts[2]
+        back_to = "drivers_firms" if staff_type == "drivers" else "mechanics_firms"
+
+        await query.edit_message_text(
+            technadzor_staff_list_text(staff_type, firm),
+            reply_markup=technadzor_staff_back_keyboard(back_to)
+        )
+        return
+
+    if data.startswith("tz_staff_back|"):
+        back_to = data.split("|", 1)[1]
+
+        if back_to == "staff_menu":
+            await query.edit_message_text(
+                "👥 Ходимлар менюси",
+                reply_markup=technadzor_staff_menu_keyboard()
+            )
+            return
+
+        if back_to == "drivers_firms":
+            await query.edit_message_text(
+                "🚚 Ҳайдовчилар\n\nФирмани танланг:",
+                reply_markup=technadzor_staff_firms_keyboard("drivers")
+            )
+            return
+
+        if back_to == "mechanics_firms":
+            await query.edit_message_text(
+                "🔧 Механиклар\n\nФирмани танланг:",
+                reply_markup=technadzor_staff_firms_keyboard("mechanics")
+            )
+            return
 
     if data == "fuel_gas_view":
         try:
