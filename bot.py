@@ -2413,16 +2413,59 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Сизнинг ID: {update.effective_user.id}"
     )
 
+async def clear_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Фойдаланувчидаги жорий state ва сақланган inline/history маълумотларни тозалайди."""
+    chat_id = update.effective_chat.id
+
+    # /clear командасининг ўзини ўчиришга ҳаракат қиламиз.
+    if update.message:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+    # Бот сақлаб қолган preview/inline хабарларини ўчиришга ҳаракат қиламиз.
+    message_ids = set()
+    for key in [
+        "gasgive_confirm_message_id",
+        "dieselgive_confirm_message_id",
+        "fuel_gas_confirm_message_id",
+    ]:
+        value = context.user_data.get(key)
+        if value:
+            message_ids.add(value)
+
+    for message_id in list(context.user_data.get("bot_message_ids", [])):
+        if message_id:
+            message_ids.add(message_id)
+
+    for message_id in message_ids:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=int(message_id))
+        except Exception:
+            pass
+
+    cancel_gas_auto_confirm_task(context)
+    context.user_data.clear()
+    context.user_data["history"] = []
+    context.user_data["inline_disabled_by_start"] = True
+
+    msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text="✅ Чат тозаланди. Янги меню учун /start босинг.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    context.user_data["bot_message_ids"] = [msg.message_id]
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["history"] = []
 
-    if update.message:
-        await update.message.reply_text(
-            "🔄 Меню янгиланмоқда...",
-            reply_markup=ReplyKeyboardRemove()
-        )
-    
+    # /start босилганда эски inline кнопкалар блокланади.
+    # Кейин фойдаланувчи янги менюдан танлов қилганда handle_message бу блокни очади.
+    context.user_data["inline_disabled_by_start"] = True
+
     role = get_role(update)
     driver_status = get_driver_status(update.effective_user.id)
 
@@ -2644,6 +2687,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = update.message.text.strip()
+    context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
 
     if mode == "diesel_receive_reject_note":
@@ -3466,11 +3510,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "gasgive_edit_car"
 
         await update.message.reply_text(
-            "✅ Фирма танланди. Энди газ оладиган техникани танланг.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-
-        await update.message.reply_text(
             "🚛 Қайси газли техникага ГАЗ беряпсиз?",
             reply_markup=gas_cars_by_firm_keyboard(
                 text,
@@ -3530,11 +3569,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["gasgive_firm"] = text
         context.user_data["mode"] = "gasgive_car"
-
-        await update.message.reply_text(
-            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
-            reply_markup=back_keyboard()
-        )
 
         await update.message.reply_text(
             "🚛 Қайси газли техникага ГАЗ беряпсиз?",
@@ -3966,6 +4000,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
+
+    if context.user_data.get("inline_disabled_by_start"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await query.answer("Бу эски кнопка. /start дан кейин янги менюдан фойдаланинг.", show_alert=True)
+        return
 
     if data == "fuel_gas_view":
         try:
@@ -6888,6 +6930,7 @@ def run_server():
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("clear", clear_chat))
 app.add_handler(CommandHandler("id", get_id))
 app.add_handler(CallbackQueryHandler(handle_callback))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
