@@ -4112,7 +4112,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
 
-        if mode == "choose_car":
+        if mode == "choose_car" or context.user_data.get("operation") == "add":
             push_state(context, "choose_repair_type")
             await update.message.reply_text("Ремонт турини танланг:", reply_markup=repair_type_keyboard())
             return
@@ -4717,37 +4717,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Актив жараёнлардаги inline кнопкалар /start дан кейин ҳам ишлаши керак.
     # Эски меню кнопкалари эса inline_disabled_by_start билан блокланади.
     if data in ["confirm_driver", "edit_driver"]:
-        active_inline_allowed = current_mode == "driver_confirm"
+        active_inline_allowed = True
 
     if data.startswith("driver_edit|"):
-        active_inline_allowed = current_mode in ["driver_confirm"]
+        active_inline_allowed = True
 
     if data.startswith("car_"):
-        active_inline_allowed = current_mode in [
-            "driver_car",
-            "driver_edit_car",
-            "choose_car",
-            "remove_car",
-            "repair_add_car",
-            "repair_exit_car",
-            "mechanic_repair_add_car",
-            "mechanic_repair_exit_car",
-            "technadzor_repair_check",
-            "registration_car_select",
-        ]
+        active_inline_allowed = True
 
     if data.startswith("car|"):
-        active_inline_allowed = current_mode in [
-            "history_select_car",
-            "choose_car",
-            "remove_car",
-            "repair_add_car",
-            "repair_exit_car",
-            "mechanic_repair_add_car",
-            "mechanic_repair_exit_car",
-            "registration_car_select",
-            "driver_register_car",
-        ]
+        active_inline_allowed = True
 
     # Регистрация inline кнопкалари doim ishlashi kerak
     if data.startswith("firm_") or data.startswith("role_") or data.startswith("register_"):
@@ -7124,68 +7103,71 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
 
     if data.startswith("car_"):
 
-        car = data.replace("car_", "")
-    
-        # DRIVER REGISTRATION
-        if context.user_data.get("mode") in ["driver_car", "driver_edit_car"]:
-    
-            try:
-                await query.edit_message_reply_markup(reply_markup=None)
-            except:
-                pass
-    
-            context.user_data["driver_car"] = car
-            context.user_data["mode"] = "driver_confirm"
-    
-            await show_driver_confirm(query.message, context)
-            return
-    
-        # REPAIR SYSTEM
+        car = data.replace("car_", "", 1)
         mode = context.user_data.get("mode")
-    
-        if mode == "choose_car":
-    
+        operation = context.user_data.get("operation")
+
+        # REPAIR SYSTEM — биринчи текширилади.
+        # Ремонтга қўшиш техника кнопкалари ҳам car_ билан келади.
+        if mode == "choose_car" or operation == "add":
+
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
-            except:
+            except Exception:
                 pass
-    
+
             context.user_data["car"] = car
-    
+            context.user_data["operation"] = "add"
+
             repair_type = context.user_data.get("repair_type")
-    
+
             await send_last_repairs(query, car, repair_type)
-    
+
             context.user_data["mode"] = "write_km"
-    
+
             await query.message.reply_text(
-                f"🚛 Техника: {car}\n"
-                f"🏢 Фирма: {context.user_data.get('firm')}\n"
-                f"🔧 Ремонт тури: {repair_type}\n\n"
-                "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>\n\n"
+                f"🚛 Техника: {car}\\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\\n"
+                f"🔧 Ремонт тури: {repair_type}\\n\\n"
+                "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>\\n\\n"
                 "Мисол: 125000",
                 parse_mode="HTML",
                 reply_markup=back_keyboard()
             )
             return
 
-        if mode == "remove_car":
+        if mode == "remove_car" or operation == "remove":
 
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
-            except:
+            except Exception:
                 pass
 
             context.user_data["car"] = car
+            context.user_data["operation"] = "remove"
             context.user_data["mode"] = "write_note_remove"
 
             await query.message.reply_text(
-                f"🚛 Техника: {car}\n"
-                f"🏢 Фирма: {context.user_data.get('firm')}\n\n"
+                f"🚛 Техника: {car}\\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\\n\\n"
                 "🔴 <b>Қилинган иш бўйича изоҳ ёзинг:</b>",
                 parse_mode="HTML",
                 reply_markup=back_keyboard()
             )
+            return
+
+        # DRIVER REGISTRATION / EDIT
+        if mode in ["driver_car", "driver_edit_car"]:
+
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            context.user_data["driver_car"] = car
+            context.user_data["mode"] = "driver_confirm"
+
+            await show_driver_confirm(query.message, context)
             return
 
     if data == "confirm_driver":
@@ -7237,7 +7219,7 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             )
             return
 
-        if mode == "choose_car":
+        if mode == "choose_car" or context.user_data.get("operation") == "add":
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
@@ -7261,7 +7243,7 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             )
             return
 
-        if mode == "remove_car":
+        if mode == "remove_car" or context.user_data.get("operation") == "remove":
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
