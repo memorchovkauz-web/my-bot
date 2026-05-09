@@ -4316,13 +4316,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Қабул қилувчи текширувида",
                 rejected_transfer_id
             ))
-            """, (
-                liter,
-                note,
-                video_id,
-                "Қабул қилувчи текширувида",
-                rejected_transfer_id
-            ))
 
             conn.commit()
 
