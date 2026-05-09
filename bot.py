@@ -601,6 +601,27 @@ def technadzor_keyboard():
     ], resize_keyboard=True)
 
 def technadzor_staff_menu_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("🚚 Ҳайдовчилар")],
+        [KeyboardButton("🔧 Механиклар")],
+        [KeyboardButton("⛽ Заправщиклар")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
+def technadzor_staff_firms_reply_keyboard():
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(name)] for name in FIRM_NAMES] + [[KeyboardButton("⬅️ Орқага")]],
+        resize_keyboard=True
+    )
+
+
+def technadzor_staff_back_reply_keyboard():
+    return ReplyKeyboardMarkup([[KeyboardButton("⬅️ Орқага")]], resize_keyboard=True)
+
+
+def technadzor_staff_menu_inline_keyboard():
+    # Эски callback структурани бузмаслик учун қолдирилди, лекин янги UXда меню пастки кнопкаларда.
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚚 Ҳайдовчилар", callback_data="tz_staff|drivers")],
         [InlineKeyboardButton("🔧 Механиклар", callback_data="tz_staff|mechanics")],
@@ -609,12 +630,14 @@ def technadzor_staff_menu_keyboard():
 
 
 def technadzor_staff_back_keyboard(back_to="staff_menu"):
+    # Эски callback структурани бузмаслик учун қолдирилди.
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ Орқага", callback_data=f"tz_staff_back|{back_to}")]
     ])
 
 
 def technadzor_staff_firms_keyboard(staff_type):
+    # Эски callback структурани бузмаслик учун қолдирилди. Янги UXда фирмалар пастки кнопкада.
     role_map = {
         "drivers": "driver",
         "mechanics": "mechanic",
@@ -644,6 +667,26 @@ def technadzor_staff_firms_keyboard(staff_type):
     buttons = [[InlineKeyboardButton(firm, callback_data=f"tz_staff_firm|{staff_type}|{firm}")] for firm in firms]
     buttons.append([InlineKeyboardButton("⬅️ Орқага", callback_data="tz_staff_back|staff_menu")])
     return InlineKeyboardMarkup(buttons)
+
+
+async def clear_technadzor_staff_inline(context, chat_id):
+    message_ids = []
+    for key in ["technadzor_staff_message_id", "technadzor_staff_inline_message_id"]:
+        value = context.user_data.get(key)
+        if value:
+            message_ids.append(value)
+
+    for message_id in message_ids:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=int(message_id))
+        except Exception:
+            try:
+                await context.bot.edit_message_reply_markup(chat_id=chat_id, message_id=int(message_id), reply_markup=None)
+            except Exception:
+                pass
+
+    context.user_data.pop("technadzor_staff_message_id", None)
+    context.user_data.pop("technadzor_staff_inline_message_id", None)
 
 
 def get_car_type_by_number(car_number):
@@ -728,6 +771,65 @@ def technadzor_staff_list_text(staff_type, firm=None):
         lines.append(f"{i}. {details}")
 
     return text + "\n".join(lines)
+
+
+def technadzor_staff_list_inline_keyboard(staff_type, firm=None):
+    role_map = {
+        "drivers": "driver",
+        "mechanics": "mechanic",
+        "zapravshik": "zapravshik",
+    }
+    work_role = role_map.get(staff_type, "driver")
+
+    params = [work_role]
+    firm_filter = ""
+    if firm:
+        firm_filter = "AND firm = %s"
+        params.append(firm)
+
+    try:
+        cursor.execute(f"""
+            SELECT name, surname, firm, car
+            FROM drivers
+            WHERE COALESCE(work_role, 'driver') = %s
+              AND status = 'Тасдиқланди'
+              {firm_filter}
+            ORDER BY firm, surname, name
+        """, tuple(params))
+        rows = cursor.fetchall()
+    except Exception as e:
+        print("TECHNADZOR STAFF INLINE LIST ERROR:", e)
+        rows = []
+
+    if not rows:
+        return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Маълумот топилмади", callback_data="none")]])
+
+    buttons = []
+    current_firm = None
+
+    for row in rows:
+        name = row[0] or ""
+        surname = row[1] or ""
+        firm_name = row[2] or ""
+        car = row[3] or ""
+        full_name = f"{surname} {name}".strip() or "Номаълум"
+
+        if staff_type == "drivers":
+            short_name = f"{surname} {name[:1]}.".strip() if name else (surname or "Номаълум")
+            car_type = get_car_type_by_number(car)
+            button_text = " / ".join([x for x in [short_name, car, car_type] if x]) or "Номаълум"
+        elif staff_type == "mechanics":
+            if firm_name != current_firm:
+                current_firm = firm_name
+                buttons.append([InlineKeyboardButton(f"🏢 {firm_name or 'Фирма йўқ'}", callback_data="none")])
+            button_text = full_name
+        else:
+            button_text = " / ".join([x for x in [full_name, firm_name] if x]) or "Номаълум"
+
+        # Telegram callback_data 64 байтдан ошмаслиги учун рўйхат тугмалари фақат кўриш учун.
+        buttons.append([InlineKeyboardButton(button_text[:60], callback_data="none")])
+
+    return InlineKeyboardMarkup(buttons)
 
 def repair_type_keyboard():
     return ReplyKeyboardMarkup(
@@ -3788,6 +3890,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     if text == "⬅️ Орқага":
+        if mode == "technadzor_staff_menu":
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            context.user_data.clear()
+            await update.message.reply_text("🧑‍🔍 Текширувчи менюси:", reply_markup=technadzor_keyboard())
+            return
+
+        if mode == "technadzor_staff_drivers_firm":
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            context.user_data["mode"] = "technadzor_staff_menu"
+            await update.message.reply_text("👥 Ходимлар менюси", reply_markup=technadzor_staff_menu_keyboard())
+            return
+
+        if mode == "technadzor_staff_drivers_list":
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            context.user_data["mode"] = "technadzor_staff_drivers_firm"
+            context.user_data.pop("technadzor_staff_firm", None)
+            await update.message.reply_text(
+                "🚚 Ҳайдовчилар\n\nФирмани танланг:",
+                reply_markup=technadzor_staff_firms_reply_keyboard()
+            )
+            return
+
+        if mode in ["technadzor_staff_mechanics_list", "technadzor_staff_zapravshik_list"]:
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            context.user_data["mode"] = "technadzor_staff_menu"
+            await update.message.reply_text("👥 Ходимлар менюси", reply_markup=technadzor_staff_menu_keyboard())
+            return
+
         if mode == "driver_car":
             context.user_data["mode"] = "driver_firm"
 
@@ -3968,6 +4098,68 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if role == "technadzor":
+        if text == "👥 Ходимлар":
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            context.user_data["mode"] = "technadzor_staff_menu"
+            await update.message.reply_text(
+                "👥 Ходимлар менюси",
+                reply_markup=technadzor_staff_menu_keyboard()
+            )
+            return
+
+        if mode == "technadzor_staff_menu":
+            if text == "🚚 Ҳайдовчилар":
+                await clear_technadzor_staff_inline(context, update.effective_chat.id)
+                context.user_data["mode"] = "technadzor_staff_drivers_firm"
+                await update.message.reply_text(
+                    "🚚 Ҳайдовчилар\n\nФирмани танланг:",
+                    reply_markup=technadzor_staff_firms_reply_keyboard()
+                )
+                return
+
+            if text == "🔧 Механиклар":
+                await clear_technadzor_staff_inline(context, update.effective_chat.id)
+                context.user_data["mode"] = "technadzor_staff_mechanics_list"
+                await update.message.reply_text(
+                    "🔧 Механиклар рўйхати",
+                    reply_markup=technadzor_staff_back_reply_keyboard()
+                )
+                msg = await update.message.reply_text(
+                    "🔧 Механиклар:",
+                    reply_markup=technadzor_staff_list_inline_keyboard("mechanics")
+                )
+                context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                return
+
+            if text == "⛽ Заправщиклар":
+                await clear_technadzor_staff_inline(context, update.effective_chat.id)
+                context.user_data["mode"] = "technadzor_staff_zapravshik_list"
+                await update.message.reply_text(
+                    "⛽ Заправщиклар рўйхати",
+                    reply_markup=technadzor_staff_back_reply_keyboard()
+                )
+                msg = await update.message.reply_text(
+                    "⛽ Заправщиклар:",
+                    reply_markup=technadzor_staff_list_inline_keyboard("zapravshik")
+                )
+                context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                return
+
+        if mode == "technadzor_staff_drivers_firm" and text in FIRM_NAMES:
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            context.user_data["mode"] = "technadzor_staff_drivers_list"
+            context.user_data["technadzor_staff_firm"] = text
+            await update.message.reply_text(
+                f"🚚 Ҳайдовчилар\n🏢 {text}",
+                reply_markup=technadzor_staff_back_reply_keyboard()
+            )
+            msg = await update.message.reply_text(
+                "🚚 Ҳайдовчилар рўйхати:",
+                reply_markup=technadzor_staff_list_inline_keyboard("drivers", text)
+            )
+            context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            return
+
         if text == "🔧 Ремонтга қўшиш":
             context.user_data.clear()
             context.user_data["mode"] = "select_firm_for_add"
@@ -3977,15 +4169,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "☑️ Ремонтдан чиқишини тасдиқлаш":
             context.user_data["mode"] = "confirm_exit"
             await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
-            return
-
-        if text == "👥 Ходимлар":
-            context.user_data["mode"] = "technadzor_staff_menu"
-            msg = await update.message.reply_text(
-                "👥 Ходимлар менюси",
-                reply_markup=technadzor_staff_menu_keyboard()
-            )
-            context.user_data["technadzor_staff_message_id"] = msg.message_id
             return
 
         if text == "📚 История":
@@ -4132,6 +4315,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    if data == "none":
+        return
+
     if context.user_data.get("inline_disabled_by_start"):
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -4183,7 +4369,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if back_to == "staff_menu":
             await query.edit_message_text(
                 "👥 Ходимлар менюси",
-                reply_markup=technadzor_staff_menu_keyboard()
+                reply_markup=technadzor_staff_menu_inline_keyboard()
             )
             return
 
