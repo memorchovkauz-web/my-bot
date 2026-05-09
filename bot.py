@@ -1870,6 +1870,7 @@ def register_edit_keyboard(context):
         [InlineKeyboardButton("👤 Исм", callback_data="driver_edit|name")],
         [InlineKeyboardButton("👤 Фамилия", callback_data="driver_edit|surname")],
         [InlineKeyboardButton("📞 Телефон", callback_data="driver_edit|phone")],
+        [InlineKeyboardButton("🪪 Лавозим", callback_data="driver_edit|role")],
     ]
 
     if work_role in ["driver", "mechanic"]:
@@ -3051,6 +3052,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
+
+    if mode == "driver_edit_role":
+        role_map = {
+            "🚚 Ҳайдовчи": "driver",
+            "🔧 Механик": "mechanic",
+            "⛽ Заправщик": "zapravshik",
+        }
+
+        if text not in role_map:
+            await update.message.reply_text(
+                "❌ Лавозимни пастки менюдан танланг.",
+                reply_markup=register_role_keyboard()
+            )
+            return
+
+        new_role = role_map[text]
+        context.user_data["driver_work_role"] = new_role
+
+        if new_role == "zapravshik":
+            context.user_data["driver_firm"] = ""
+            context.user_data["driver_car"] = ""
+            context.user_data["mode"] = "driver_confirm"
+            await show_driver_confirm(update.message, context)
+            return
+
+        context.user_data["driver_firm"] = ""
+        context.user_data["driver_car"] = ""
+        context.user_data["mode"] = "driver_edit_firm_mechanic" if new_role == "mechanic" else "driver_edit_firm"
+
+        await update.message.reply_text(
+            "🏢 Янги фирмани танланг:",
+            reply_markup=firm_keyboard()
+        )
+        return
 
     if mode == "diesel_receive_reject_note":
         if not is_valid_gas_note(text):
@@ -4709,6 +4744,88 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "none":
         return
 
+    # === PRIORITY: регистрация таҳрирлаш кнопкалари ===
+    if data.startswith("driver_edit|"):
+        context.user_data["inline_disabled_by_start"] = False
+
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        field = data.split("|", 1)[1]
+
+        if field == "name":
+            context.user_data["mode"] = "driver_edit_name"
+            await query.message.reply_text(
+                "🔴 <b>Янги исмни киритинг</b>\n\nМисол: Тешавой",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if field == "surname":
+            context.user_data["mode"] = "driver_edit_surname"
+            await query.message.reply_text(
+                "🔴 <b>Янги фамилияни киритинг</b>\n\nМисол: Алиев",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if field == "phone":
+            context.user_data["mode"] = "driver_phone_edit"
+            await query.message.reply_text(
+                "📞 Янги телефон рақамни юборинг:",
+                reply_markup=phone_keyboard()
+            )
+            return
+
+        if field == "role":
+            context.user_data["mode"] = "driver_edit_role"
+            await query.message.reply_text(
+                "🪪 Янги лавозимни танланг:",
+                reply_markup=register_role_keyboard()
+            )
+            return
+
+        if field == "firm":
+            if context.user_data.get("driver_work_role") == "zapravshik":
+                await query.message.reply_text(
+                    "❌ Заправщик учун фирма танлаш керак эмас.",
+                    reply_markup=register_edit_keyboard(context)
+                )
+                return
+
+            if context.user_data.get("driver_work_role") == "mechanic":
+                context.user_data["mode"] = "driver_edit_firm_mechanic"
+            else:
+                context.user_data["mode"] = "driver_edit_firm"
+
+            await query.message.reply_text(
+                "🏢 Янги фирмани танланг:",
+                reply_markup=firm_keyboard()
+            )
+            return
+
+        if field == "car":
+            if context.user_data.get("driver_work_role") != "driver":
+                await query.message.reply_text(
+                    "❌ Бу лавозим учун техника таҳрирлаш керак эмас.",
+                    reply_markup=register_edit_keyboard(context)
+                )
+                return
+
+            firm = context.user_data.get("driver_firm")
+            context.user_data["mode"] = "driver_edit_car"
+            await query.message.reply_text(
+                "🚛 Янги техникани танланг:",
+                reply_markup=car_buttons_by_firm(firm)
+            )
+            return
+
+    # === PRIORITY END ===
+
     # === PRIORITY FIX: регистрация ва ремонт inline кнопкалари ===
     # Бу блок /start ҳимояси ва пастдаги умумий role-check'лардан ОЛДИН ишлайди.
     # Шунинг учун регистрациядаги Тасдиқлаш/Таҳрирлаш ва ремонтдаги техника танлаш блокланмайди.
@@ -4737,7 +4854,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # REPAIR ADD
-        if mode == "choose_car" or operation == "add":
+        if mode == "choose_car" or operation == "add" or mode in ["repair_add_car", "mechanic_repair_add_car"]:
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
@@ -4764,7 +4881,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # REPAIR REMOVE
-        if mode == "remove_car" or operation == "remove":
+        if mode == "remove_car" or operation == "remove" or mode in ["repair_exit_car", "mechanic_repair_exit_car"]:
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
