@@ -3151,6 +3151,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        context.user_data["inline_disabled_by_start"] = False
         context.user_data["driver_work_role"] = role_map[text]
         context.user_data["mode"] = "driver_name"
 
@@ -3590,6 +3591,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "🚚 Рўйхатдан ўтиш" and mode in [None, "driver_register_start"]:
+        context.user_data["inline_disabled_by_start"] = False
         context.user_data["mode"] = "driver_name"
 
         await update.message.reply_text(
@@ -3627,6 +3629,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
             return
+
+    if mode == "driver_surname":
+        context.user_data["driver_surname"] = text
+        context.user_data["mode"] = "driver_phone"
+
+        await update.message.reply_text(
+            "📞 Телефон рақамингизни юборинг:",
+            reply_markup=phone_keyboard()
+        )
+        return
 
     if mode in ["driver_phone", "driver_phone_edit"]:
         phone = text.replace(" ", "").replace("+", "")
@@ -4579,6 +4591,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "🔧 Ремонтга қўшиш":
+        context.user_data["inline_disabled_by_start"] = False
         if not context.user_data.get("firm"):
             await update.message.reply_text("Аввал фирмани танланг.")
             return
@@ -4594,6 +4607,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "✅ Ремонтдан чиқариш":
+        context.user_data["inline_disabled_by_start"] = False
         if role not in ["director", "mechanic", "slesar"]:
             await deny(update)
             return
@@ -4615,6 +4629,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text in REPAIR_TYPES:
+        context.user_data["inline_disabled_by_start"] = False
         if not context.user_data.get("firm"):
             await update.message.reply_text("Аввал фирмани танланг.")
             return
@@ -4699,17 +4714,31 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_mode = context.user_data.get("mode")
     active_inline_allowed = False
 
+    # Актив жараёнлардаги inline кнопкалар /start дан кейин ҳам ишлаши керак.
+    # Эски меню кнопкалари эса inline_disabled_by_start билан блокланади.
     if data in ["confirm_driver", "edit_driver"]:
         active_inline_allowed = current_mode == "driver_confirm"
 
     if data.startswith("driver_edit|"):
-        active_inline_allowed = current_mode == "driver_confirm"
+        active_inline_allowed = current_mode in ["driver_confirm"]
 
     if data.startswith("car_"):
-        active_inline_allowed = current_mode in ["driver_car", "driver_edit_car", "choose_car", "remove_car"]
+        active_inline_allowed = current_mode in [
+            "driver_car",
+            "driver_edit_car",
+            "choose_car",
+            "remove_car",
+        ]
 
     if data.startswith("car|"):
-        active_inline_allowed = current_mode in ["history_select_car", "choose_car", "remove_car"]
+        active_inline_allowed = current_mode in [
+            "history_select_car",
+            "choose_car",
+            "remove_car",
+        ]
+
+    if data.startswith("approve_driver|") or data.startswith("reject_driver|"):
+        active_inline_allowed = True
 
     if data.startswith("tz_staff"):
         active_inline_allowed = current_mode in [
@@ -7189,6 +7218,11 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         if mode == "choose_car":
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
             context.user_data["car"] = car
             repair_type = context.user_data.get("repair_type")
 
@@ -7865,6 +7899,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
         return
 
+    context.user_data["inline_disabled_by_start"] = False
     context.user_data["phone"] = contact.phone_number
 
     if mode == "driver_phone_edit":
