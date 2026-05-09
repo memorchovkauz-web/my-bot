@@ -1760,6 +1760,13 @@ def diesel_rejected_sender_keyboard(transfer_id):
         [InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_rejected_cancel|{transfer_id}")]
     ])
 
+def diesel_rejected_after_view_keyboard(transfer_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_rejected_resend|{transfer_id}")],
+        [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_rejected_edit|{transfer_id}")],
+        [InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_rejected_cancel|{transfer_id}")]
+    ])
+
 def diesel_rejected_receiver_keyboard(transfer_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👁 Кўриш", callback_data=f"diesel_receiver_rejected_view|{transfer_id}")],
@@ -3691,6 +3698,157 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
+
+    # === EARLY PATCH: HISTORY PERIOD AND DIESEL VIEW START ===
+
+    if data.startswith("period|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        period = data.split("|", 1)[1]
+
+        if period == "custom":
+            context.user_data["mode"] = "history_custom_period"
+
+            await query.message.reply_text(
+                "🔴 <b>Қайси давр оралиғини кўрмоқчисиз?</b>\n\n"
+                "Мисол:\n"
+                "01.01.2026-28.04.2026",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        car = context.user_data.get("history_car")
+
+        if not car:
+            await query.message.reply_text("❌ Техника танланмаган. Историяни қайтадан бошланг.")
+            return
+
+        start_date, end_date = get_period_dates(period)
+
+        if not start_date or not end_date:
+            await query.message.reply_text("❌ Давр хатолик.")
+            return
+
+        await send_history_by_date(query.message, car, start_date, end_date)
+
+        context.user_data["mode"] = None
+        return
+
+    if data.startswith("diesel_rejected_view|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT
+                from_driver_id,
+                from_car,
+                to_car,
+                firm,
+                liter,
+                note,
+                video_id,
+                receiver_comment,
+                created_at
+            FROM diesel_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        from_driver_id, from_car, to_car, firm, liter, note, video_id, receiver_comment, created_at = row
+
+        if int(update.effective_user.id) != int(from_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+        reject_reason = receiver_comment or "Кўрсатилмаган"
+
+        if video_id:
+            await safe_send_video(context.bot, query.message.chat_id, video_id)
+
+        await query.message.reply_text(
+            "❌ ДИЗЕЛ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
+            f"🕒 Вақт: {created_text}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"🚛 Дизел берган: {from_car}\n"
+            f"🚛 Дизел олган: {to_car}\n"
+            f"📝 Изоҳ: {note}\n"
+            f"⛽ Литр: {liter}\n\n"
+            f"❗ Рад этилиш сабаби: {reject_reason}\n\n"
+            "Маълумотни нима қиласиз?",
+            reply_markup=diesel_rejected_after_view_keyboard(transfer_id)
+        )
+        return
+
+    if data.startswith("diesel_receiver_rejected_view|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT
+                to_driver_id,
+                from_car,
+                to_car,
+                firm,
+                liter,
+                note,
+                video_id,
+                receiver_comment,
+                created_at
+            FROM diesel_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        to_driver_id, from_car, to_car, firm, liter, note, video_id, receiver_comment, created_at = row
+
+        if int(update.effective_user.id) != int(to_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+        reject_reason = receiver_comment or "Кўрсатилмаган"
+
+        if video_id:
+            await safe_send_video(context.bot, query.message.chat_id, video_id)
+
+        await query.message.reply_text(
+            "❌ ДИЗЕЛ ОЛИШ РАД ЭТИЛДИ\n\n"
+            f"🕒 Вақт: {created_text}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"🚛 Дизел берган: {from_car}\n"
+            f"🚛 Дизел олган: {to_car}\n"
+            f"📝 Изоҳ: {note}\n"
+            f"⛽ Литр: {liter}\n\n"
+            f"❗ Рад этилиш сабаби: {reject_reason}\n\n"
+            "Маълумотни нима қиласиз?",
+            reply_markup=diesel_rejected_receiver_keyboard(transfer_id)
+        )
+        return
+
+    # === EARLY PATCH: HISTORY PERIOD AND DIESEL VIEW END ===
 
     if query.data == "none":
         return
