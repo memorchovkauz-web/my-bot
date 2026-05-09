@@ -857,6 +857,16 @@ def gas_give_edit_keyboard():
 
 def gas_receiver_confirm_keyboard(transfer_id):
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👁 Кўриш", callback_data=f"gas_receive_view|{transfer_id}")],
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"gasgive_accept|{transfer_id}"),
+            InlineKeyboardButton("❌ Рад этиш", callback_data=f"gasgive_reject|{transfer_id}")
+        ]
+    ])
+
+
+def gas_receiver_after_view_keyboard(transfer_id):
+    return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"gasgive_accept|{transfer_id}"),
             InlineKeyboardButton("❌ Рад этиш", callback_data=f"gasgive_reject|{transfer_id}")
@@ -1019,36 +1029,23 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
     from_driver_name = short_driver_name(from_driver)
     to_driver_name = short_driver_name(to_driver)
 
-    if created_at:
-        created_at = created_at.strftime("%d.%m.%Y %H:%M:%S")
-    
+    created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+    note = note or ""
+
     message_text = (
-        "⛽ Сизга ГАЗ бериш маълумоти келди\n\n"
-        f"🕒 Вақт: {created_at}\n"
+        "⛽ Сизга ГАЗ берилди\n\n"
+        f"🕒 Вақт: {created_text}\n"
         f"🏢 Фирма: {firm}\n"
-        f"🚛 Газ берувчи: {from_car} — {from_driver_name}\n"
-        f"🚛 Газ олувчи: {to_car} — {to_driver_name}\n"
+        f"🚛 Газ берган: {from_car} — {from_driver_name}\n"
+        f"🚛 Газ олган: {to_car} — {to_driver_name}\n"
         f"📝 Изоҳ: {note}\n\n"
-        "Тасдиқлайсизми?"
+        "Маълумотни тасдиқлайсизми?"
     )
 
     await context.bot.send_message(
         chat_id=int(to_driver_id),
         text=message_text,
         reply_markup=gas_receiver_confirm_keyboard(transfer_id)
-    )
-
-    context.user_data.setdefault("media_store", {})
-    context.user_data["media_store"][f"gas_receiver_{transfer_id}"] = {
-        "text": message_text,
-        "photo_id": "",
-        "video_id": video_id
-    }
-
-    await context.bot.send_message(
-        chat_id=int(to_driver_id),
-        text="📎 Расм/видеони кўриш учун пастдаги тугмани босинг:",
-        reply_markup=view_media_keyboard(f"gas_receiver_{transfer_id}")
     )
 
     schedule_gas_auto_accept_task(context, transfer_id)
@@ -4169,6 +4166,59 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "🎥 Янги думалоқ видео юборинг.\n\n⏱ Видео 10 сониядан кам бўлмасин."
+        )
+        return
+
+    if data.startswith("gas_receive_view|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id, created_at
+            FROM gas_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id, created_at = row
+
+        if int(update.effective_user.id) != int(to_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+        note = note or ""
+
+        text = (
+            "⛽ ГАЗ МАЪЛУМОТИ\n\n"
+            f"🕒 Вақт: {created_text}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"🚛 Газ берган техника: {from_car}\n"
+            f"🚛 Газ олган техника: {to_car}\n"
+            f"📝 Изоҳ: {note}\n"
+        )
+
+        if video_id:
+            try:
+                await context.bot.send_video_note(
+                    chat_id=query.message.chat_id,
+                    video_note=video_id
+                )
+            except Exception:
+                await safe_send_video(context.bot, query.message.chat_id, video_id)
+
+        await query.message.reply_text(
+            text,
+            reply_markup=gas_receiver_after_view_keyboard(transfer_id)
         )
         return
 
