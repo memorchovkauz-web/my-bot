@@ -873,6 +873,23 @@ def gas_receiver_after_view_keyboard(transfer_id):
         ]
     ])
 
+
+def gas_rejected_sender_keyboard(transfer_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👁 Кўриш", callback_data=f"gas_rejected_view|{transfer_id}")],
+        [InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"gas_rejected_resend|{transfer_id}")],
+        [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"gas_rejected_edit|{transfer_id}")],
+        [InlineKeyboardButton("❌ Отмен", callback_data=f"gas_rejected_cancel|{transfer_id}")]
+    ])
+
+
+def gas_rejected_after_view_keyboard(transfer_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"gas_rejected_resend|{transfer_id}")],
+        [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"gas_rejected_edit|{transfer_id}")],
+        [InlineKeyboardButton("❌ Отмен", callback_data=f"gas_rejected_cancel|{transfer_id}")]
+    ])
+
 def view_media_keyboard(media_key):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👁 Кўриш", callback_data=f"view_media|{media_key}")]
@@ -1049,6 +1066,67 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
     )
 
     schedule_gas_auto_accept_task(context, transfer_id)
+
+
+async def notify_gas_sender_confirmed(context, transfer_id):
+    cursor.execute("""
+        SELECT from_driver_id, from_car, to_car
+        FROM gas_transfers
+        WHERE id = %s
+    """, (transfer_id,))
+
+    row = cursor.fetchone()
+    if not row:
+        return
+
+    from_driver_id, from_car, to_car = row
+
+    await context.bot.send_message(
+        chat_id=int(from_driver_id),
+        text=(
+            "✅ Газ бериш маълумотингиз тасдиқланди.\n\n"
+            f"🚛 Газ берган техника: {from_car}\n"
+            f"🚛 Газ олган техника: {to_car}"
+        )
+    )
+
+
+async def notify_gas_sender_rejected(context, transfer_id, reason):
+    cursor.execute("""
+        SELECT
+            from_driver_id,
+            from_car,
+            to_car,
+            firm,
+            note,
+            created_at
+        FROM gas_transfers
+        WHERE id = %s
+    """, (transfer_id,))
+
+    row = cursor.fetchone()
+    if not row:
+        return
+
+    from_driver_id, from_car, to_car, firm, note, created_at = row
+    created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+    note = note or ""
+    reason = reason or "Кўрсатилмаган"
+
+    await context.bot.send_message(
+        chat_id=int(from_driver_id),
+        text=(
+            "❌ ГАЗ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
+            f"🕒 Вақт: {created_text}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"🚛 Газ берган техника: {from_car}\n"
+            f"🚛 Газ олган техника: {to_car}\n"
+            f"📝 Изоҳ: {note}\n\n"
+            f"❗ Рад сабаби: {reason}\n\n"
+            "Маълумотни нима қиласиз?"
+        ),
+        reply_markup=gas_rejected_sender_keyboard(transfer_id)
+    )
 
 
 async def auto_confirm_gas_transfer(context):
@@ -2736,16 +2814,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
         if row:
-            from_driver_id, to_car = row
-            await context.bot.send_message(
-                chat_id=int(from_driver_id),
-                text=(
-                    "❌ Газ бериш маълумотингиз рад этилди.\n\n"
-                    f"🚛 Техника: {to_car}\n"
-                    f"🕒 Вақт: {reject_time}\n"
-                    f"📝 Сабаб: {reject_note}"
-                )
-            )
+            await notify_gas_sender_rejected(context, transfer_id, reject_note)
 
         await update.message.reply_text(
             "❌ Маълумот рад этилди ва газ берувчи ҳайдовчига хабар юборилди."
@@ -4039,7 +4108,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "❌ Газ бериш маълумоти бекор қилинди.",
-            reply_markup=fuel_menu_keyboard()
+            reply_markup=gas_report_keyboard()
         )
         return
 
@@ -4103,7 +4172,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "✅ Газ бериш маълумоти базага сақланди ва олувчи ҳайдовчига юборилди.",
-            reply_markup=fuel_menu_keyboard()
+            reply_markup=gas_report_keyboard()
         )
 
         context.user_data.clear()
@@ -4167,6 +4236,184 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             "🎥 Янги думалоқ видео юборинг.\n\n⏱ Видео 10 сониядан кам бўлмасин."
         )
+        return
+
+    if data.startswith("gas_rejected_view|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT
+                from_driver_id,
+                from_car,
+                to_car,
+                firm,
+                note,
+                video_id,
+                receiver_comment,
+                created_at
+            FROM gas_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        from_driver_id, from_car, to_car, firm, note, video_id, receiver_comment, created_at = row
+
+        if int(update.effective_user.id) != int(from_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+        reject_reason = receiver_comment or "Кўрсатилмаган"
+        note = note or ""
+
+        if video_id:
+            await safe_send_video(context.bot, query.message.chat_id, video_id)
+
+        await query.message.reply_text(
+            "❌ ГАЗ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
+            f"🕒 Вақт: {created_text}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"🚛 Газ берган техника: {from_car}\n"
+            f"🚛 Газ олган техника: {to_car}\n"
+            f"📝 Изоҳ: {note}\n\n"
+            f"❗ Рад сабаби: {reject_reason}\n\n"
+            "Маълумотни нима қиласиз?",
+            reply_markup=gas_rejected_after_view_keyboard(transfer_id)
+        )
+        return
+
+    if data.startswith("gas_rejected_resend|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT from_driver_id
+            FROM gas_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        from_driver_id = row[0]
+
+        if int(update.effective_user.id) != int(from_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        cursor.execute("""
+            UPDATE gas_transfers
+            SET status = %s,
+                receiver_comment = NULL,
+                answered_at = NULL
+            WHERE id = %s
+        """, ("Қабул қилувчи текширувида", transfer_id))
+
+        conn.commit()
+
+        await send_gas_transfer_to_receiver(context, transfer_id)
+        await query.message.reply_text("✅ Маълумот қайта газ олувчига юборилди.", reply_markup=gas_report_keyboard())
+        return
+
+    if data.startswith("gas_rejected_edit|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT
+                from_driver_id,
+                from_car,
+                to_car,
+                firm,
+                note,
+                video_id
+            FROM gas_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        from_driver_id, from_car, to_car, firm, note, video_id = row
+
+        if int(update.effective_user.id) != int(from_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        context.user_data["gas_edit_rejected_id"] = transfer_id
+        context.user_data["gasgive_from_car"] = from_car or ""
+        context.user_data["gasgive_to_car"] = to_car or ""
+        context.user_data["gasgive_firm"] = firm or ""
+        context.user_data["gasgive_note"] = note or ""
+        context.user_data["gasgive_video_id"] = video_id or ""
+        context.user_data["mode"] = "gasgive_edit_menu"
+
+        await query.message.reply_text(
+            "✏️ Қайси маълумотни таҳрирлайсиз?",
+            reply_markup=gas_give_edit_keyboard()
+        )
+        return
+
+    if data.startswith("gas_rejected_cancel|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT from_driver_id
+            FROM gas_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        from_driver_id = row[0]
+
+        if int(update.effective_user.id) != int(from_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        cursor.execute("""
+            UPDATE gas_transfers
+            SET status = %s,
+                answered_at = NOW()
+            WHERE id = %s
+        """, ("Бекор қилинди", transfer_id))
+
+        conn.commit()
+
+        await query.message.reply_text("❌ Рад этилган газ маълумоти бекор қилинди.", reply_markup=gas_report_keyboard())
         return
 
     if data.startswith("gas_receive_view|"):
@@ -4234,18 +4481,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             UPDATE gas_transfers
             SET status = %s, answered_at = NOW()
             WHERE id = %s
-            RETURNING from_driver_id, to_car
+            RETURNING from_driver_id
         """, ("Тасдиқланди", transfer_id))
 
         row = cursor.fetchone()
         conn.commit()
 
         if row:
-            from_driver_id, to_car = row
-            await context.bot.send_message(
-                chat_id=int(from_driver_id),
-                text=f"✅ Газ бериш маълумотингиз тасдиқланди.\n🚛 Техника: {to_car}"
-            )
+            await notify_gas_sender_confirmed(context, transfer_id)
 
         await query.message.reply_text("✅ Маълумот тасдиқланди.")
         return
@@ -4348,7 +4591,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "✅ Газ бериш маълумоти базага сақланди ва олувчи ҳайдовчига юборилди.",
-            reply_markup=fuel_menu_keyboard()
+            reply_markup=gas_report_keyboard()
         )
 
         context.user_data.clear()
