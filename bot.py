@@ -3699,6 +3699,65 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    if data == "diesel_edit_car":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_edit_firm"
+
+        await query.message.reply_text(
+            "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
+            reply_markup=diesel_firm_keyboard()
+        )
+        return
+
+    if data == "diesel_edit_liter":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_edit_liter"
+
+        await query.message.reply_text(
+            "⛽ Янги дизел миқдорини киритинг.\n\n"
+            "Фақат рақам киритинг.\n"
+            "Мисол: 60",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if data == "diesel_edit_note":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_edit_note"
+
+        await query.message.reply_text(
+            "📝 Янги изоҳни киритинг.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if data == "diesel_edit_video":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_edit_video"
+
+        await query.message.reply_text(
+            "🎥 Янги думалоқ видео юборинг.\n\n"
+            "⏱ Видео 10 сониядан кам бўлмасин.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
     # === EARLY PATCH: HISTORY PERIOD AND DIESEL VIEW START ===
 
     if data.startswith("period|"):
