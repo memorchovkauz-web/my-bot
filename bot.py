@@ -4444,32 +4444,50 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("diesel_rejected_edit|"):
-        transfer_id = data.split("|", 1)[1]
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
     
-        context.user_data["mode"] = "diesel_receive_reject_note"
-        context.user_data["diesel_reject_transfer_id"] = transfer_id
-    
-        await query.message.reply_text(
-            "✏️ Янги рад этиш сабабини ёзинг:",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
-
-    if data.startswith("diesel_rejected_cancel|"):
         transfer_id = data.split("|", 1)[1]
     
         cursor.execute("""
-            UPDATE diesel_transfers
-            SET status = %s,
-                receiver_comment = NULL,
-                answered_at = NULL
+            SELECT
+                from_driver_id,
+                from_car,
+                to_car,
+                firm,
+                liter,
+                note,
+                video_id
+            FROM diesel_transfers
             WHERE id = %s
-        """, ("Қабул қилувчи текширувида", transfer_id))
+        """, (transfer_id,))
     
-        conn.commit()
+        row = cursor.fetchone()
+    
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+    
+        from_driver_id, from_car, to_car, firm, liter, note, video_id = row
+    
+        if int(update.effective_user.id) != int(from_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+    
+        context.user_data["diesel_edit_rejected_id"] = transfer_id
+        context.user_data["dieselgive_from_car"] = from_car
+        context.user_data["dieselgive_to_car"] = to_car
+        context.user_data["dieselgive_firm"] = firm
+        context.user_data["dieselgive_liter"] = liter
+        context.user_data["dieselgive_note"] = note
+        context.user_data["dieselgive_video_id"] = video_id
+        context.user_data["mode"] = "dieselgive_edit_menu"
     
         await query.message.reply_text(
-            "❌ Рад этиш бекор қилинди."
+            "✏️ Қайси маълумотни таҳрирлайсиз?",
+            reply_markup=diesel_give_edit_keyboard()
         )
         return
 
