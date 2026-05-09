@@ -4243,6 +4243,36 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data.startswith("diesel_rejected_edit|"):
+        transfer_id = data.split("|", 1)[1]
+    
+        context.user_data["mode"] = "diesel_receive_reject_note"
+        context.user_data["diesel_reject_transfer_id"] = transfer_id
+    
+        await query.message.reply_text(
+            "✏️ Янги рад этиш сабабини ёзинг:",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if data.startswith("diesel_rejected_cancel|"):
+        transfer_id = data.split("|", 1)[1]
+    
+        cursor.execute("""
+            UPDATE diesel_transfers
+            SET status = %s,
+                receiver_comment = NULL,
+                answered_at = NULL
+            WHERE id = %s
+        """, ("Қабул қилувчи текширувида", transfer_id))
+    
+        conn.commit()
+    
+        await query.message.reply_text(
+            "❌ Рад этиш бекор қилинди."
+        )
+        return
+
 
     if data.startswith("diesel_rejected_view|"):
         transfer_id = data.split("|", 1)[1]
@@ -4490,9 +4520,10 @@ async def diesel_rejected_resend(update: Update, context: ContextTypes.DEFAULT_T
 
     cursor.execute("""
         UPDATE diesel_transfers
-        SET status = 'Берилди'
+        SET status = %s,
+            answered_at = NOW()
         WHERE id = %s
-    """, (transfer_id,))
+    """, ("Берилди", transfer_id))
 
     conn.commit()
 
