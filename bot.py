@@ -3700,6 +3700,35 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    if data == "dieselgive_cancel":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data.clear()
+        context.user_data["mode"] = "diesel_menu"
+
+        await query.message.reply_text(
+            "❌ Дизел маълумоти бекор қилинди.",
+            reply_markup=diesel_report_keyboard()
+        )
+        return
+
+    if data == "dieselgive_edit":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_edit_menu"
+
+        await query.message.reply_text(
+            "✏️ Қайси маълумотни таҳрирлайсиз?",
+            reply_markup=diesel_give_edit_keyboard()
+        )
+        return
+
     if data == "diesel_edit_car":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
