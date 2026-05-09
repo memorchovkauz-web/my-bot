@@ -815,7 +815,8 @@ def gas_give_confirm_keyboard():
         [
             InlineKeyboardButton("✅ Тасдиқлаш", callback_data="gasgive_confirm"),
             InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="gasgive_edit")
-        ]
+        ],
+        [InlineKeyboardButton("❌ Отмен", callback_data="gasgive_cancel")]
     ])
 
 
@@ -896,6 +897,43 @@ def diesel_confirm_text(context):
     )
     
 
+def gas_confirm_text(context):
+    created_time = context.user_data.get("gasgive_created_time") or now_text()
+    context.user_data["gasgive_created_time"] = created_time
+
+    try:
+        shown_time = datetime.strptime(created_time, "%Y-%m-%d %H:%M:%S").strftime("%d-%m-%Y %H:%M")
+    except Exception:
+        shown_time = created_time
+
+    return (
+        "✅ ГАЗ БЕРИШ МАЪЛУМОТЛАРИ\n\n"
+        f"🚛 Газ берган техника номери: {context.user_data.get('gasgive_from_car')}\n"
+        f"🚛 Газ олган техника номери: {context.user_data.get('gasgive_to_car')}\n"
+        f"🕒 Вақт: {shown_time}\n"
+        f"📝 Изоҳ: {context.user_data.get('gasgive_note')}\n"
+        "🎥 Видео: сақланди ✅\n\n"
+        "Маълумот тўғрими?"
+    )
+
+
+def cancel_gas_auto_confirm_task(context):
+    task = context.user_data.get("gas_auto_confirm_task")
+    if task and not task.done():
+        task.cancel()
+    context.user_data.pop("gas_auto_confirm_task", None)
+    context.user_data.pop("gas_auto_confirm_token", None)
+
+
+def schedule_gas_auto_confirm_task(context, user_id):
+    cancel_gas_auto_confirm_task(context)
+    token = datetime.now().timestamp()
+    context.user_data["gas_auto_confirm_token"] = token
+    context.user_data["gas_auto_confirm_task"] = asyncio.create_task(
+        auto_confirm_gas_transfer(context, user_id, token)
+    )
+
+
 def get_driver_by_car(car):
     cursor.execute("""
         SELECT telegram_id, name, surname
@@ -973,11 +1011,22 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
     asyncio.create_task(auto_accept_gas_transfer(context, transfer_id))
 
 
-async def auto_confirm_gas_transfer(context, user_id):
-    await asyncio.sleep(900)  # 15 минут
-    
+async def auto_confirm_gas_transfer(context, user_id, token):
+    try:
+        await asyncio.sleep(900)  # 15 минут
+    except asyncio.CancelledError:
+        return
+
+    if context.user_data.get("gas_auto_confirm_token") != token:
+        return
+
+    if context.user_data.get("gasgive_sent"):
+        return
+
     if context.user_data.get("mode") not in ["gasgive_confirm", "gasgive_edit_menu", "gasgive_edit_note_text", "gasgive_video"]:
         return
+
+    context.user_data["gasgive_sent"] = True
 
     from_car = context.user_data.get("gasgive_from_car")
     to_car = context.user_data.get("gasgive_to_car")
@@ -1040,6 +1089,9 @@ async def auto_confirm_gas_transfer(context, user_id):
     )
 
     await send_gas_transfer_to_receiver(context, transfer_id)
+
+    context.user_data.clear()
+    context.user_data["mode"] = "fuel_menu"
 
 
 async def auto_accept_gas_transfer(context, transfer_id):
@@ -2676,12 +2728,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         created_time = context.user_data.get("gasgive_created_time") or now_text()
 
         sent_msg = await update.message.reply_text(
-            "✅ МАЪЛУМОТЛАР\n\n"
-            f"🕒 Вақт: {created_time}\n"
-            f"🚛 ГАЗ берувчи: {from_car} — {context.user_data.get('gasgive_from_driver_name')}\n"
-            f"⛽ ГАЗ олувчи: {to_car} — {context.user_data.get('gasgive_to_driver_name')}\n"
-            f"📝 Изоҳ: {note}\n\n"
-            "Тасдиқлайсизми?",
+            gas_confirm_text(context),
             reply_markup=gas_give_confirm_keyboard()
         )
 
@@ -2690,6 +2737,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         video_id = context.user_data.get("gasgive_video_id")
         if video_id:
             await update.message.reply_video_note(video_note=video_id)
+
+        schedule_gas_auto_confirm_task(context, update.effective_user.id)
 
         return
 
@@ -3901,11 +3950,41 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "gasgive_cancel":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        cancel_gas_auto_confirm_task(context)
+
+        gas_transfer_id = context.user_data.get("gasgive_transfer_id")
+        if gas_transfer_id:
+            cursor.execute("DELETE FROM gas_transfers WHERE id = %s", (gas_transfer_id,))
+            conn.commit()
+
+        context.user_data.clear()
+        context.user_data["mode"] = "fuel_menu"
+
+        await query.message.reply_text(
+            "❌ Газ бериш маълумоти бекор қилинди.",
+            reply_markup=fuel_menu_keyboard()
+        )
+        return
+
     if data == "gasgive_confirm":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
+
+        cancel_gas_auto_confirm_task(context)
+
+        if context.user_data.get("gasgive_sent"):
+            await query.message.reply_text("✅ Бу маълумот аллақачон тасдиқланган.")
+            return
+
+        context.user_data["gasgive_sent"] = True
 
         from_car = context.user_data.get("gasgive_from_car")
         to_car = context.user_data.get("gasgive_to_car")
@@ -3946,6 +4025,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ))
 
         transfer_id = cursor.fetchone()[0]
+        context.user_data["gasgive_transfer_id"] = transfer_id
         conn.commit()
 
         await send_gas_transfer_to_receiver(context, transfer_id)
@@ -3967,9 +4047,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["mode"] = "gasgive_edit_menu"
 
-        asyncio.create_task(
-            auto_confirm_gas_transfer(context, update.effective_user.id)
-        )
+        schedule_gas_auto_confirm_task(context, update.effective_user.id)
 
         await query.message.reply_text(
             "✏️ Қайси маълумотни таҳрирлайсиз?",
@@ -4095,6 +4173,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ))
 
         transfer_id = cursor.fetchone()[0]
+        context.user_data["gasgive_transfer_id"] = transfer_id
         conn.commit()
 
         await send_gas_transfer_to_receiver(context, transfer_id)
@@ -6170,12 +6249,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["gasgive_to_driver_name"] = short_driver_name(to_driver)
 
         sent_msg = await update.message.reply_text(
-            "✅ МАЪЛУМОТЛАР\n\n"
-            f"🕒 Вақт: {created_time}\n"
-            f"🚛 ГАЗ берувчи: {from_car} — {context.user_data.get('gasgive_from_driver_name')}\n"
-            f"⛽ ГАЗ олувчи: {to_car} — {context.user_data.get('gasgive_to_driver_name')}\n"
-            f"📝 Изоҳ: {note}\n\n"
-            "Тасдиқлайсизми?",
+            gas_confirm_text(context),
             reply_markup=gas_give_confirm_keyboard()
         )
 
@@ -6185,9 +6259,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             video_note=update.message.video_note.file_id
         )
 
-        asyncio.create_task(
-            auto_confirm_gas_transfer(context, update.effective_user.id)
-        )
+        schedule_gas_auto_confirm_task(context, update.effective_user.id)
 
         return
 
