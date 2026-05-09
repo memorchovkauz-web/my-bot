@@ -4287,7 +4287,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("diesel_receiver_rejected_view|"):
-    transfer_id = data.split("|", 1)[1]
+        transfer_id = data.split("|", 1)[1]
 
     cursor.execute("""
         SELECT from_car, to_car, firm, liter, note, video_id, receiver_comment, created_at
