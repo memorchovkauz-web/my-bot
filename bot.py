@@ -907,31 +907,73 @@ def gas_confirm_text(context):
     except Exception:
         shown_time = created_time
 
+    note = context.user_data.get("gasgive_note") or ""
+
     return (
         "✅ ГАЗ БЕРИШ МАЪЛУМОТЛАРИ\n\n"
         f"🚛 Газ берган техника номери: {context.user_data.get('gasgive_from_car')}\n"
         f"🚛 Газ олган техника номери: {context.user_data.get('gasgive_to_car')}\n"
         f"🕒 Вақт: {shown_time}\n"
-        f"📝 Изоҳ: {context.user_data.get('gasgive_note')}\n"
+        f"📝 Изоҳ: {note}\n"
         "🎥 Видео: сақланди ✅\n\n"
         "Маълумот тўғрими?"
     )
 
 
 def cancel_gas_auto_confirm_task(context):
-    task = context.user_data.get("gas_auto_confirm_task")
-    if task and not task.done():
-        task.cancel()
-    context.user_data.pop("gas_auto_confirm_task", None)
+    job_name = context.user_data.get("gas_auto_confirm_job_name")
+
+    if job_name and context.job_queue:
+        for job in context.job_queue.get_jobs_by_name(job_name):
+            job.schedule_removal()
+
+    context.user_data.pop("gas_auto_confirm_job_name", None)
     context.user_data.pop("gas_auto_confirm_token", None)
 
 
 def schedule_gas_auto_confirm_task(context, user_id):
     cancel_gas_auto_confirm_task(context)
-    token = datetime.now().timestamp()
+
+    if not context.job_queue:
+        print("[gas_auto_confirm] JobQueue topilmadi. python-telegram-bot[job-queue] o'rnatilganini tekshiring.")
+        return
+
+    token = str(datetime.now().timestamp())
+    job_name = f"gas_auto_confirm_{user_id}_{token}"
+
     context.user_data["gas_auto_confirm_token"] = token
-    context.user_data["gas_auto_confirm_task"] = asyncio.create_task(
-        auto_confirm_gas_transfer(context, user_id, token)
+    context.user_data["gas_auto_confirm_job_name"] = job_name
+
+    context.job_queue.run_once(
+        auto_confirm_gas_transfer,
+        when=900,  # 15 минут
+        data={
+            "user_id": user_id,
+            "token": token,
+        },
+        name=job_name,
+        chat_id=user_id,
+        user_id=user_id,
+    )
+
+
+def schedule_gas_auto_accept_task(context, transfer_id):
+    if not context.job_queue:
+        print("[gas_auto_accept] JobQueue topilmadi. python-telegram-bot[job-queue] o'rnatilganini tekshiring.")
+        return
+
+    job_name = f"gas_auto_accept_{transfer_id}"
+
+    for job in context.job_queue.get_jobs_by_name(job_name):
+        job.schedule_removal()
+
+    context.job_queue.run_once(
+        auto_accept_gas_transfer,
+        when=21600,  # 6 соат
+        data={
+            "transfer_id": transfer_id,
+        },
+        name=job_name,
     )
 
 
@@ -1009,14 +1051,13 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
         reply_markup=view_media_keyboard(f"gas_receiver_{transfer_id}")
     )
 
-    asyncio.create_task(auto_accept_gas_transfer(context, transfer_id))
+    schedule_gas_auto_accept_task(context, transfer_id)
 
 
-async def auto_confirm_gas_transfer(context, user_id, token):
-    try:
-        await asyncio.sleep(900)  # 15 минут
-    except asyncio.CancelledError:
-        return
+async def auto_confirm_gas_transfer(context):
+    job_data = context.job.data or {}
+    user_id = job_data.get("user_id")
+    token = job_data.get("token")
 
     if context.user_data.get("gas_auto_confirm_token") != token:
         return
@@ -1095,8 +1136,12 @@ async def auto_confirm_gas_transfer(context, user_id, token):
     context.user_data["mode"] = "fuel_menu"
 
 
-async def auto_accept_gas_transfer(context, transfer_id):
-    await asyncio.sleep(21600)  # 6 соат
+async def auto_accept_gas_transfer(context):
+    job_data = context.job.data or {}
+    transfer_id = job_data.get("transfer_id")
+
+    if not transfer_id:
+        return
 
     cursor.execute("""
         SELECT status, from_driver_id, to_car
@@ -4090,6 +4135,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+        context.user_data["gasgive_note_before_edit"] = context.user_data.get("gasgive_note") or ""
         context.user_data["mode"] = "gasgive_edit_firm"
 
         schedule_gas_auto_confirm_task(context, update.effective_user.id)
@@ -4181,6 +4227,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         car = data.split("|", 1)[1]
 
         context.user_data["gasgive_to_car"] = car
+        if not context.user_data.get("gasgive_note"):
+            context.user_data["gasgive_note"] = context.user_data.get("gasgive_note_before_edit", "")
         context.user_data["mode"] = "gasgive_confirm"
 
         to_driver = get_driver_by_car(car)
