@@ -4728,6 +4728,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "driver_edit_car",
             "choose_car",
             "remove_car",
+            "repair_add_car",
+            "repair_exit_car",
+            "mechanic_repair_add_car",
+            "mechanic_repair_exit_car",
+            "technadzor_repair_check",
+            "registration_car_select",
         ]
 
     if data.startswith("car|"):
@@ -4735,7 +4741,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "history_select_car",
             "choose_car",
             "remove_car",
+            "repair_add_car",
+            "repair_exit_car",
+            "mechanic_repair_add_car",
+            "mechanic_repair_exit_car",
+            "registration_car_select",
+            "driver_register_car",
         ]
+
+    # Регистрация inline кнопкалари doim ishlashi kerak
+    if data.startswith("firm_") or data.startswith("role_") or data.startswith("register_"):
+        active_inline_allowed = True
+
+    # Ремонт inline кнопкалари doim ishlashi kerak
+    if data.startswith("repair_") or data.startswith("remont_"):
+        active_inline_allowed = True
 
     if data.startswith("approve_driver|") or data.startswith("reject_driver|"):
         active_inline_allowed = True
