@@ -3793,6 +3793,54 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data.startswith("diesel_rejected_edit|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT
+                from_driver_id,
+                from_car,
+                to_car,
+                firm,
+                liter,
+                note,
+                video_id
+            FROM diesel_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        from_driver_id, from_car, to_car, firm, liter, note, video_id = row
+
+        if int(update.effective_user.id) != int(from_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        context.user_data["diesel_edit_rejected_id"] = transfer_id
+        context.user_data["dieselgive_from_car"] = from_car
+        context.user_data["dieselgive_to_car"] = to_car
+        context.user_data["dieselgive_firm"] = firm
+        context.user_data["dieselgive_liter"] = liter
+        context.user_data["dieselgive_note"] = note
+        context.user_data["dieselgive_video_id"] = video_id
+        context.user_data["mode"] = "dieselgive_edit_menu"
+
+        await query.message.reply_text(
+            "✏️ Қайси маълумотни таҳрирлайсиз?",
+            reply_markup=diesel_give_edit_keyboard()
+        )
+        return
+
     if data.startswith("diesel_receiver_rejected_view|"):
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -4199,7 +4247,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 liter,
                 note,
                 video_id,
-                "Қайта юборилди",
+                "Қабул қилувчи текширувида",
                 rejected_transfer_id
             ))
 
@@ -4443,55 +4491,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data.startswith("diesel_rejected_edit|"):
-        try:
-            await query.edit_message_reply_markup(reply_markup=None)
-        except Exception:
-            pass
-    
-        transfer_id = data.split("|", 1)[1]
-    
-        cursor.execute("""
-            SELECT
-                from_driver_id,
-                from_car,
-                to_car,
-                firm,
-                liter,
-                note,
-                video_id
-            FROM diesel_transfers
-            WHERE id = %s
-        """, (transfer_id,))
-    
-        row = cursor.fetchone()
-    
-        if not row:
-            await query.message.reply_text("❌ Маълумот топилмади.")
-            return
-    
-        from_driver_id, from_car, to_car, firm, liter, note, video_id = row
-    
-        if int(update.effective_user.id) != int(from_driver_id):
-            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
-            return
-    
-        context.user_data["diesel_edit_rejected_id"] = transfer_id
-        context.user_data["dieselgive_from_car"] = from_car
-        context.user_data["dieselgive_to_car"] = to_car
-        context.user_data["dieselgive_firm"] = firm
-        context.user_data["dieselgive_liter"] = liter
-        context.user_data["dieselgive_note"] = note
-        context.user_data["dieselgive_video_id"] = video_id
-        context.user_data["mode"] = "dieselgive_edit_menu"
-    
-        await query.message.reply_text(
-            "✏️ Қайси маълумотни таҳрирлайсиз?",
-            reply_markup=diesel_give_edit_keyboard()
-        )
-        return
-
-
     if data.startswith("diesel_rejected_view|"):
         transfer_id = data.split("|", 1)[1]
 
@@ -4632,43 +4631,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await send_diesel_transfer_to_receiver(context, transfer_id)
         await query.message.reply_text("✅ Маълумот қайта дизел олувчига юборилди.")
-        return
-
-    if data.startswith("diesel_rejected_edit|"):
-        try:
-            await query.edit_message_reply_markup(reply_markup=None)
-        except Exception:
-            pass
-
-        transfer_id = data.split("|", 1)[1]
-
-        cursor.execute("""
-            SELECT from_driver_id, liter, note, video_id
-            FROM diesel_transfers
-            WHERE id = %s
-        """, (transfer_id,))
-
-        row = cursor.fetchone()
-
-        if not row:
-            await query.message.reply_text("❌ Маълумот топилмади.")
-            return
-
-        from_driver_id, liter, note, video_id = row
-
-        if int(update.effective_user.id) != int(from_driver_id):
-            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
-            return
-
-        context.user_data["diesel_edit_rejected_id"] = transfer_id
-        context.user_data["dieselgive_liter"] = liter
-        context.user_data["dieselgive_note"] = note
-        context.user_data["dieselgive_video_id"] = video_id
-
-        await query.message.reply_text(
-            "✏️ Қайси маълумотни таҳрирлайсиз?",
-            reply_markup=diesel_give_edit_keyboard()
-        )
         return
 
     if data.startswith("diesel_receiver_rejected_accept|"):
