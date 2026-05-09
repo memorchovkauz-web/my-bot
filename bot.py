@@ -689,7 +689,7 @@ def gas_firm_keyboard():
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 
-def gas_cars_by_firm_keyboard(firm, exclude_car=None):
+def gas_cars_by_firm_keyboard(firm, exclude_car=None, callback_prefix="gasgive_car"):
     cursor.execute("""
         SELECT car_number, car_type
         FROM cars
@@ -706,7 +706,7 @@ def gas_cars_by_firm_keyboard(firm, exclude_car=None):
         keyboard.append([
             InlineKeyboardButton(
                 f"{car_number} | {car_type}",
-                callback_data=f"gasgive_car|{car_number}"
+                callback_data=f"{callback_prefix}|{car_number}"
             )
         ])
 
@@ -849,6 +849,7 @@ def diesel_give_edit_keyboard():
 
 def gas_give_edit_keyboard():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚛 Газ олган техникани ўзгартириш", callback_data="gasgive_edit_to_car")],
         [InlineKeyboardButton("📝 Изоҳ", callback_data="gasgive_edit_note")],
         [InlineKeyboardButton("🎥 Видео", callback_data="gasgive_edit_video")]
     ])
@@ -1023,7 +1024,7 @@ async def auto_confirm_gas_transfer(context, user_id, token):
     if context.user_data.get("gasgive_sent"):
         return
 
-    if context.user_data.get("mode") not in ["gasgive_confirm", "gasgive_edit_menu", "gasgive_edit_note_text", "gasgive_video"]:
+    if context.user_data.get("mode") not in ["gasgive_confirm", "gasgive_edit_menu", "gasgive_edit_note_text", "gasgive_video", "gasgive_edit_firm", "gasgive_edit_car"]:
         return
 
     context.user_data["gasgive_sent"] = True
@@ -2734,9 +2735,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["gasgive_confirm_message_id"] = sent_msg.message_id
 
-        video_id = context.user_data.get("gasgive_video_id")
-        if video_id:
-            await update.message.reply_video_note(video_note=video_id)
 
         schedule_gas_auto_confirm_task(context, update.effective_user.id)
 
@@ -3337,6 +3335,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ Сиздан фақат думалоқ видео хабар ёки видео файл юборишингизни сўрайман!",
             reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "gasgive_edit_firm":
+        if text == "⬅️ Орқага":
+            context.user_data["mode"] = "gasgive_edit_menu"
+            await update.message.reply_text(
+                "✏️ Қайси маълумотни таҳрирлайсиз?",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await update.message.reply_text(
+                "✏️ Таҳрирлаш менюси",
+                reply_markup=gas_give_edit_keyboard()
+            )
+            return
+
+        context.user_data["gasgive_firm"] = text
+        context.user_data["mode"] = "gasgive_edit_car"
+
+        await update.message.reply_text(
+            "✅ Фирма танланди. Энди газ оладиган техникани танланг.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+
+        await update.message.reply_text(
+            "🚛 Қайси газли техникага ГАЗ беряпсиз?",
+            reply_markup=gas_cars_by_firm_keyboard(
+                text,
+                context.user_data.get("gasgive_from_car"),
+                callback_prefix="gasgive_edit_car"
+            )
         )
         return
 
@@ -4055,6 +4084,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "gasgive_edit_to_car":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "gasgive_edit_firm"
+
+        schedule_gas_auto_confirm_task(context, update.effective_user.id)
+
+        await query.message.reply_text(
+            "🏢 Қайси фирмадаги газли техникани танлайсиз?",
+            reply_markup=gas_firm_keyboard()
+        )
+        return
+
     if data == "gasgive_edit_note":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -4125,6 +4170,31 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Фақат ҳарф ва рақам қабул қилинади.",
             reply_markup=ReplyKeyboardRemove()
         )
+        return
+
+    if data.startswith("gasgive_edit_car|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        car = data.split("|", 1)[1]
+
+        context.user_data["gasgive_to_car"] = car
+        context.user_data["mode"] = "gasgive_confirm"
+
+        to_driver = get_driver_by_car(car)
+        context.user_data["gasgive_to_driver_name"] = short_driver_name(to_driver)
+
+        sent_msg = await query.message.reply_text(
+            gas_confirm_text(context),
+            reply_markup=gas_give_confirm_keyboard()
+        )
+
+        context.user_data["gasgive_confirm_message_id"] = sent_msg.message_id
+
+        schedule_gas_auto_confirm_task(context, update.effective_user.id)
+
         return
 
     if data.startswith("gasgive_car|"):
@@ -6255,9 +6325,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["gasgive_confirm_message_id"] = sent_msg.message_id
 
-        await update.message.reply_video_note(
-            video_note=update.message.video_note.file_id
-        )
 
         schedule_gas_auto_confirm_task(context, update.effective_user.id)
 
