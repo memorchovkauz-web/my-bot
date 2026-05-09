@@ -3695,6 +3695,59 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "none":
         return
 
+        # === PRIORITY CAR CALLBACK FIX START ===
+
+    if data.startswith("dieselgive_car|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        car = data.split("|", 1)[1]
+
+        context.user_data["dieselgive_to_car"] = car
+
+        if context.user_data.get("mode") == "dieselgive_edit_car":
+            context.user_data["mode"] = "dieselgive_confirm"
+
+            await query.message.reply_text(
+                diesel_confirm_text(context),
+                reply_markup=diesel_give_final_keyboard()
+            )
+            return
+
+        context.user_data["mode"] = "dieselgive_liter"
+
+        await query.message.reply_text(
+            f"🚛 ДИЗЕЛ оладиган техника: {car}\n\n"
+            "⛽ Неччи литр ДИЗЕЛ беряпсиз?\n\n"
+            "Фақат рақам киритинг.\n"
+            "Мисол: 60",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if data.startswith("car|"):
+        car = data.split("|", 1)[1]
+        mode = context.user_data.get("mode")
+
+        if mode == "history_select_car":
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            context.user_data["history_car"] = car
+            context.user_data["mode"] = "history_period"
+
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n\nҚайси давр бўйича история керак?",
+                reply_markup=history_period_keyboard()
+            )
+            return
+
+    # === PRIORITY CAR CALLBACK FIX END ===
+
     if query.data == "final_confirm":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
