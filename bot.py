@@ -2228,7 +2228,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-            await notify_diesel_receiver_rejected(context, transfer_id, text)
 
             driver_car = get_driver_car(update.effective_user.id)
             fuel_type = get_car_fuel_type(driver_car)
