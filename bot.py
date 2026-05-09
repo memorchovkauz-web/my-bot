@@ -2442,25 +2442,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
         if row:
-            from_driver_id, to_car, liter = row
-            try:
-                await context.bot.send_message(
-                    chat_id=int(from_driver_id),
-                    text=(
-                        "❌ Дизел бериш маълумотингиз рад этилди.\n\n"
-                        f"🚛 Дизел олган техника: {to_car}\n"
-                        f"⛽ Литр: {liter}\n"
-                        f"📝 Сабаб: {text}"
-                    )
-                )
-            except Exception:
-                pass
+            await notify_diesel_sender_rejected(context, transfer_id, text)
+
+        await notify_diesel_receiver_rejected(context, transfer_id, text)
 
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
 
         context.user_data.clear()
-        await notify_diesel_receiver_rejected(context, transfer_id, text)
 
         await update.message.reply_text("❌ Дизел олиш рад этилди.")
         await update.message.reply_text(
