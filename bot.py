@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 import threading
 import asyncio
 import psycopg2
@@ -128,9 +129,30 @@ SCOPES = [
 creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
 client = gspread.authorize(creds)
-sheet = client.open(SHEET_NAME)
 
-remont_ws = sheet.worksheet("REMONT")
+
+def gspread_retry(action_name, func, attempts=6, base_delay=3):
+    """Google Sheets баъзида 500/Internal error беради.
+    Шу ҳолатда бот дарров ўчмаслиги учун қайта уриниб кўрамиз.
+    """
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return func()
+        except gspread.exceptions.APIError as e:
+            last_error = e
+            wait_seconds = base_delay * attempt
+            print(f"[GSPREAD RETRY] {action_name} failed ({attempt}/{attempts}): {e}")
+            if attempt < attempts:
+                time.sleep(wait_seconds)
+
+    print(f"[GSPREAD ERROR] {action_name} failed after {attempts} attempts: {last_error}")
+    raise last_error
+
+
+sheet = gspread_retry("open spreadsheet", lambda: client.open(SHEET_NAME))
+
+remont_ws = gspread_retry("open worksheet REMONT", lambda: sheet.worksheet("REMONT"))
 
 def sync_repairs_to_db():
     rows = remont_ws.get_all_values()[1:]
@@ -232,7 +254,7 @@ def save_new_repair_to_db(
 
     conn.commit()
 
-mashina_ws = sheet.worksheet("MASHINALAR")
+mashina_ws = gspread_retry("open worksheet MASHINALAR", lambda: sheet.worksheet("MASHINALAR"))
 
 def sync_cars_to_db():
     cars = mashina_ws.get_all_values()[1:]
@@ -280,7 +302,7 @@ sync_cars_to_db()
 
 print("CARS SYNCED")
 
-drivers_ws = sheet.worksheet("DRIVERS")
+drivers_ws = gspread_retry("open worksheet DRIVERS", lambda: sheet.worksheet("DRIVERS"))
 
 def sync_drivers_to_db():
     drivers = drivers_ws.get_all_values()[1:]
