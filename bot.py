@@ -4329,7 +4329,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             conn.commit()
 
-            await send_diesel_transfer_to_receiver(context, rejected_transfer_id)
+            try:
+                await send_diesel_transfer_to_receiver(context, rejected_transfer_id)
+            except Exception as e:
+                print("REJECTED DIESEL RESEND ERROR:", e)
 
             await query.message.reply_text(
                 "✅ Таҳрирланган дизел маълумоти қайта олувчи ҳайдовчига юборилди.",
