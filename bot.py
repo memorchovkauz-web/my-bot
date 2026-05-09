@@ -1852,12 +1852,15 @@ async def notify_diesel_sender_rejected(context, transfer_id, reason):
     await context.bot.send_message(
         chat_id=int(from_driver_id),
         text=(
-            "❌ Дизел бериш маълумотингиз рад этилди.\\n\\n"
-            f"🚛 Берган техника: {from_car}\\n"
-            f"🚛 Олган техника: {to_car}\\n"
-            f"⛽ Литр: {liter}\\n\\n"
-            f"📝 Сабаб: {reason}\\n\\n"
-            "Кейинги амални танланг:"
+            "❌ ДИЗЕЛ ОЛИШ РАД ЭТИЛДИ\n\n"
+            f"🕒 Вақт: {created_text}\n"
+            f"🏢 Фирма: {firm}\n"
+            f"🚛 Дизел берган: {from_car}\n"
+            f"🚛 Дизел олган: {to_car}\n"
+            f"📝 Изоҳ: {note}\n"
+            f"⛽ Литр: {liter}\n\n"
+            f"❗ Рад этилиш сабаби: {reason}\n\n"
+            "Маълумотни нима қиласиз?"
         ),
         reply_markup=diesel_rejected_sender_keyboard(transfer_id)
     )
@@ -1886,21 +1889,6 @@ async def notify_diesel_receiver_rejected(context, transfer_id, reason):
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
-    await context.bot.send_message(
-        chat_id=int(to_driver_id),
-        text=(
-            "❌ ДИЗЕЛ ОЛИШ РАД ЭТИЛДИ\n\n"
-            f"🕒 Вақт: {created_text}\n"
-            f"🏢 Фирма: {firm}\n"
-            f"🚛 Дизел берган: {from_car}\n"
-            f"🚛 Дизел олган: {to_car}\n"
-            f"📝 Изоҳ: {note}\n"
-            f"⛽ Литр: {liter}\n\n"
-            f"❗ Рад этилиш сабаби: {reason}\n\n"
-            "Маълумотни нима қиласиз?"
-        ),
-        reply_markup=diesel_rejected_receiver_keyboard(transfer_id)
-    )
 
 # === DIESEL RECEIVER CONFIRM FLOW HELPERS END ===
 
