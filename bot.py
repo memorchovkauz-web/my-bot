@@ -4709,6 +4709,227 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "none":
         return
 
+    # === PRIORITY FIX: регистрация ва ремонт inline кнопкалари ===
+    # Бу блок /start ҳимояси ва пастдаги умумий role-check'лардан ОЛДИН ишлайди.
+    # Шунинг учун регистрациядаги Тасдиқлаш/Таҳрирлаш ва ремонтдаги техника танлаш блокланмайди.
+    if data in ["confirm_driver", "edit_driver"] or data.startswith("driver_edit|") or data.startswith("car_") or data.startswith("car|"):
+        context.user_data["inline_disabled_by_start"] = False
+
+    if data.startswith("car_") or data.startswith("car|"):
+        car = data.split("|", 1)[1] if data.startswith("car|") else data.replace("car_", "", 1)
+        mode = context.user_data.get("mode")
+        operation = context.user_data.get("operation")
+
+        # HISTORY
+        if mode == "history_select_car":
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            context.user_data["history_car"] = car
+            context.user_data["mode"] = "history_period"
+
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n\nҚайси давр бўйича история керак?",
+                reply_markup=history_period_keyboard()
+            )
+            return
+
+        # REPAIR ADD
+        if mode == "choose_car" or operation == "add":
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            context.user_data["car"] = car
+            context.user_data["operation"] = "add"
+
+            repair_type = context.user_data.get("repair_type")
+
+            await send_last_repairs(query, car, repair_type)
+
+            context.user_data["mode"] = "write_km"
+
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\n"
+                f"🔧 Ремонт тури: {repair_type}\n\n"
+                "🔴 <b>Юрган масофа ёки моточасни киритинг:</b>\n\n"
+                "Мисол: 125000",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        # REPAIR REMOVE
+        if mode == "remove_car" or operation == "remove":
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            context.user_data["car"] = car
+            context.user_data["operation"] = "remove"
+            context.user_data["mode"] = "write_note_remove"
+
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\n\n"
+                "🔴 <b>Қилинган иш бўйича изоҳ ёзинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        # REGISTRATION / REGISTRATION EDIT CAR
+        if mode in ["driver_car", "driver_edit_car"]:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            context.user_data["driver_car"] = car
+            context.user_data["mode"] = "driver_confirm"
+
+            await show_driver_confirm(query.message, context)
+            return
+
+        # STAFF EDIT CAR
+        if mode == "technadzor_staff_edit_car":
+            driver_id = context.user_data.get("staff_edit_driver_id")
+            if driver_id:
+                cursor.execute("UPDATE drivers SET car = %s WHERE telegram_id = %s", (car, driver_id))
+                conn.commit()
+            context.user_data["mode"] = "technadzor_staff_card"
+            await query.message.reply_text("✅ Техника ўзгартирилди.")
+            return
+
+    # === PRIORITY FIX END ===
+
+
+
+    # === PRIORITY FIX: регистрация Тасдиқлаш/Таҳрирлаш ===
+    if data == "edit_driver":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await query.message.reply_text(
+            "✏️ Қайси маълумотни таҳрирлайсиз?",
+            reply_markup=register_edit_keyboard(context)
+        )
+        return
+
+    if data == "confirm_driver":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        user_id = update.effective_user.id
+
+        if context.user_data.get("driver_work_role") == "zapravshik":
+            context.user_data["driver_firm"] = ""
+            context.user_data["driver_car"] = ""
+
+        # PostgreSQL — асосий база
+        cursor.execute("""
+            INSERT INTO drivers (
+                telegram_id,
+                name,
+                surname,
+                phone,
+                firm,
+                car,
+                status,
+                work_role
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (telegram_id)
+            DO UPDATE SET
+                name = EXCLUDED.name,
+                surname = EXCLUDED.surname,
+                phone = EXCLUDED.phone,
+                firm = EXCLUDED.firm,
+                car = EXCLUDED.car,
+                status = EXCLUDED.status,
+                work_role = EXCLUDED.work_role
+        """, (
+            user_id,
+            context.user_data.get("driver_name", ""),
+            context.user_data.get("driver_surname", ""),
+            context.user_data.get("phone", ""),
+            context.user_data.get("driver_firm", ""),
+            context.user_data.get("driver_car", ""),
+            "Текширувда",
+            context.user_data.get("driver_work_role", "driver")
+        ))
+        conn.commit()
+
+        # Google Sheets — қўшимча, хато берса бот тўхтамасин
+        try:
+            drivers_ws.append_row([
+                user_id,
+                context.user_data.get("driver_name", ""),
+                context.user_data.get("driver_surname", ""),
+                context.user_data.get("phone", ""),
+                context.user_data.get("driver_firm", ""),
+                context.user_data.get("driver_car", ""),
+                "Текширувда",
+                now_text(),
+                context.user_data.get("driver_work_role", "driver")
+            ])
+        except Exception as e:
+            print(f"[registration] Google Sheets append_row error: {e}")
+
+        # Технадзорга хабар
+        try:
+            work_role = context.user_data.get("driver_work_role", "driver")
+            employee_text = (
+                "👤 Янги ходим рўйхатдан ўтди:\n\n"
+                f"👤 Лавозим: {work_role_title(work_role)}\n"
+                f"👤 Исм: {context.user_data.get('driver_name', '')}\n"
+                f"👤 Фамилия: {context.user_data.get('driver_surname', '')}\n"
+                f"📞 Телефон: {context.user_data.get('phone', '')}\n"
+            )
+
+            if work_role == "mechanic":
+                employee_text += f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
+
+            if work_role == "driver":
+                employee_text += (
+                    f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
+                    f"🚛 Техника: {context.user_data.get('driver_car', '')}\n"
+                )
+
+            employee_text += "\nТасдиқлайсизми?"
+
+            for tech_id in get_user_ids_by_role("technadzor"):
+                try:
+                    await context.bot.send_message(
+                        chat_id=tech_id,
+                        text=employee_text,
+                        reply_markup=InlineKeyboardMarkup([
+                            [
+                                InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"approve_driver|{user_id}"),
+                                InlineKeyboardButton("❌ Рад этиш", callback_data=f"reject_driver|{user_id}")
+                            ]
+                        ])
+                    )
+                except Exception as e:
+                    print(f"[registration] send technadzor error: {e}")
+        except Exception as e:
+            print(f"[registration] notify technadzor block error: {e}")
+
+        await query.message.reply_text("✅ Рўйхатдан ўтдингиз. Текширувга юборилди.")
+        context.user_data.clear()
+        return
+
+    # === PRIORITY FIX END ===
+
     # /start эски inline кнопкаларни блоклайди.
     # Лекин ҳозирги актив жараёндаги inline кнопкалар (регистрация/ремонт/ходимлар) ишлаши керак.
     current_mode = context.user_data.get("mode")
