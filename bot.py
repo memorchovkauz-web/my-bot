@@ -4368,7 +4368,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             liter,
             note,
             video_id,
-            "Қабул қилувчи текширувида"
+            status
         ))
 
         transfer_id = cursor.fetchone()[0]
