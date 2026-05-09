@@ -31,8 +31,15 @@ from telegram.ext import (
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+TASHKENT_TZ = ZoneInfo("Asia/Tashkent")
+
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
+try:
+    cursor.execute("SET TIME ZONE 'Asia/Tashkent'")
+    conn.commit()
+except Exception as e:
+    print("DB TIMEZONE SET ERROR:", e)
 
 
 cursor.execute("""
@@ -383,7 +390,7 @@ STATUS_ORDER = {
 
 
 def now_text():
-    return datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(TASHKENT_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def is_valid_km(value):
@@ -410,7 +417,7 @@ def calculate_duration(start_time, end_time):
 
 
 def get_period_dates(period):
-    now = datetime.now(ZoneInfo("Asia/Tashkent"))
+    now = datetime.now(TASHKENT_TZ)
 
     if period == "10":
         return now - timedelta(days=10), now
@@ -1319,7 +1326,7 @@ def schedule_gas_auto_confirm_task(context, user_id):
         print("[gas_auto_confirm] JobQueue topilmadi. python-telegram-bot[job-queue] o'rnatilganini tekshiring.")
         return
 
-    token = str(datetime.now().timestamp())
+    token = str(datetime.now(TASHKENT_TZ).timestamp())
     job_name = f"gas_auto_confirm_{user_id}_{token}"
 
     context.user_data["gas_auto_confirm_token"] = token
@@ -2495,7 +2502,7 @@ async def safe_send_photo(bot, chat_id, file_id):
 async def send_last_repairs(query, car, repair_type):
     rows = remont_ws.get_all_values()[1:]
     result = []
-    one_year_ago = datetime.now(ZoneInfo("Asia/Tashkent")) - timedelta(days=365)
+    one_year_ago = datetime.now(TASHKENT_TZ) - timedelta(days=365)
 
     for row in rows:
         if len(row) < 14:
@@ -2990,6 +2997,7 @@ async def save_final_data(update_or_query, context, message_obj):
 
 
 async def show_driver_confirm(message, context):
+    context.user_data["inline_disabled_by_start"] = False
     work_role = context.user_data.get("driver_work_role", "driver")
 
     role_titles = {
@@ -4013,7 +4021,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     if text == "⬅️ Орқага":
-        if mode in ["technadzor_staff_edit_name", "technadzor_staff_edit_surname", "technadzor_staff_edit_firm", "technadzor_staff_edit_car"]:
+        if mode in ["technadzor_staff_edit_name", "technadzor_staff_edit_surname", "technadzor_staff_edit_phone", "technadzor_staff_edit_role", "technadzor_staff_edit_firm", "technadzor_staff_edit_car"]:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             driver_id = context.user_data.get("technadzor_selected_staff_id")
             context.user_data["mode"] = "technadzor_staff_card"
@@ -4324,6 +4332,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         new_role = role_map[text]
+        context.user_data["technadzor_staff_pending_role"] = new_role
 
         try:
             if new_role == "zapravshik":
@@ -4331,9 +4340,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "UPDATE drivers SET work_role = %s, firm = NULL, car = NULL WHERE id = %s",
                     (new_role, int(driver_id))
                 )
-            else:
+            elif new_role == "mechanic":
                 cursor.execute(
                     "UPDATE drivers SET work_role = %s, car = NULL WHERE id = %s",
+                    (new_role, int(driver_id))
+                )
+            else:
+                cursor.execute(
+                    "UPDATE drivers SET work_role = %s, firm = NULL, car = NULL WHERE id = %s",
                     (new_role, int(driver_id))
                 )
             conn.commit()
@@ -4343,6 +4357,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if new_role == "zapravshik":
+            context.user_data.pop("technadzor_staff_pending_role", None)
             context.user_data["mode"] = "technadzor_staff_card"
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             await update.message.reply_text("✅ Лавозим заправщик қилиб сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
@@ -4367,7 +4382,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         staff = get_staff_by_id(driver_id)
-        work_role = (staff or {}).get("work_role", "driver")
+        work_role = context.user_data.get("technadzor_staff_pending_role") or (staff or {}).get("work_role", "driver")
 
         if work_role == "zapravshik":
             await update.message.reply_text("❌ Заправщик учун фирма танланмайди.", reply_markup=technadzor_staff_back_reply_keyboard())
@@ -4375,9 +4390,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             if work_role == "driver":
-                cursor.execute("UPDATE drivers SET firm = %s, car = NULL WHERE id = %s", (text, int(driver_id)))
+                cursor.execute(
+                    "UPDATE drivers SET work_role = %s, firm = %s, car = NULL WHERE id = %s",
+                    ("driver", text, int(driver_id))
+                )
             else:
-                cursor.execute("UPDATE drivers SET firm = %s, car = NULL WHERE id = %s", (text, int(driver_id)))
+                cursor.execute(
+                    "UPDATE drivers SET work_role = %s, firm = %s, car = NULL WHERE id = %s",
+                    ("mechanic", text, int(driver_id))
+                )
             conn.commit()
         except Exception as e:
             print("TECHNADZOR STAFF FIRM UPDATE ERROR:", e)
@@ -4392,6 +4413,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        context.user_data.pop("technadzor_staff_pending_role", None)
         context.user_data["mode"] = "technadzor_staff_card"
         await clear_technadzor_staff_inline(context, update.effective_chat.id)
         await update.message.reply_text("✅ Фирма сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
@@ -4425,13 +4447,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         car_number = row[0]
         try:
-            cursor.execute("UPDATE drivers SET car = %s WHERE id = %s", (car_number, int(driver_id)))
+            cursor.execute("UPDATE drivers SET work_role = %s, car = %s WHERE id = %s", ("driver", car_number, int(driver_id)))
             conn.commit()
         except Exception as e:
             print("TECHNADZOR STAFF CAR UPDATE ERROR:", e)
             await update.message.reply_text("❌ Сақлашда хато.", reply_markup=technadzor_staff_back_reply_keyboard())
             return
 
+        context.user_data.pop("technadzor_staff_pending_role", None)
         context.user_data["mode"] = "technadzor_staff_card"
         await clear_technadzor_staff_inline(context, update.effective_chat.id)
         await update.message.reply_text("✅ Техника сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
@@ -4671,7 +4694,34 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "none":
         return
 
-    if context.user_data.get("inline_disabled_by_start"):
+    # /start эски inline кнопкаларни блоклайди.
+    # Лекин ҳозирги актив жараёндаги inline кнопкалар (регистрация/ремонт/ходимлар) ишлаши керак.
+    current_mode = context.user_data.get("mode")
+    active_inline_allowed = False
+
+    if data in ["confirm_driver", "edit_driver"]:
+        active_inline_allowed = current_mode == "driver_confirm"
+
+    if data.startswith("driver_edit|"):
+        active_inline_allowed = current_mode == "driver_confirm"
+
+    if data.startswith("car_"):
+        active_inline_allowed = current_mode in ["driver_car", "driver_edit_car", "choose_car", "remove_car"]
+
+    if data.startswith("car|"):
+        active_inline_allowed = current_mode in ["history_select_car", "choose_car", "remove_car"]
+
+    if data.startswith("tz_staff"):
+        active_inline_allowed = current_mode in [
+            "technadzor_staff_menu",
+            "technadzor_staff_drivers_firm",
+            "technadzor_staff_drivers_list",
+            "technadzor_staff_mechanics_list",
+            "technadzor_staff_zapravshik_list",
+            "technadzor_staff_card",
+        ]
+
+    if context.user_data.get("inline_disabled_by_start") and not active_inline_allowed:
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
@@ -7070,6 +7120,25 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             )
             return
 
+        if mode == "remove_car":
+
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except:
+                pass
+
+            context.user_data["car"] = car
+            context.user_data["mode"] = "write_note_remove"
+
+            await query.message.reply_text(
+                f"🚛 Техника: {car}\n"
+                f"🏢 Фирма: {context.user_data.get('firm')}\n\n"
+                "🔴 <b>Қилинган иш бўйича изоҳ ёзинг:</b>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return
+
     if data == "confirm_driver":
         user_id = update.effective_user.id
 
@@ -7139,6 +7208,11 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         if mode == "remove_car":
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
             context.user_data["car"] = car
             context.user_data["mode"] = "write_note_remove"
 
