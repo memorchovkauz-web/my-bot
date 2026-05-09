@@ -3765,11 +3765,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         transfer_id = cursor.fetchone()[0]
         conn.commit()
 
-        await query.message.reply_text("✅ Маълумот газ олувчи ҳайдовчига юборилди.")
-
         await send_gas_transfer_to_receiver(context, transfer_id)
 
+        await query.message.reply_text(
+            "✅ Газ бериш маълумоти базага сақланди ва олувчи ҳайдовчига юборилди.",
+            reply_markup=fuel_menu_keyboard()
+        )
+
         context.user_data.clear()
+        context.user_data["mode"] = "fuel_menu"
         return
 
     if data == "gasgive_edit":
