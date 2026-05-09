@@ -4294,9 +4294,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
                 return
 
+            receiver = get_driver_by_car(to_car)
+
+            if not receiver:
+                await query.message.reply_text("❌ Дизел оладиган техника ҳайдовчиси топилмади.")
+                return
+
+            to_driver_id = receiver[0]
+
             cursor.execute("""
                 UPDATE diesel_transfers
                 SET from_car = %s,
+                    to_driver_id = %s,
                     to_car = %s,
                     firm = %s,
                     liter = %s,
@@ -4308,6 +4317,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 WHERE id = %s
             """, (
                 from_car,
+                to_driver_id,
                 to_car,
                 firm,
                 liter,
