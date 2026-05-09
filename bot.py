@@ -2362,8 +2362,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"📝 Сабаб: {text}"
                     )
                 )
-            except Exception as e:
-                print("DIESEL REJECT SEND ERROR:", e)
+            except Exception:
+                pass
 
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
@@ -2424,44 +2424,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-
-# === DIESEL RECEIVER REJECT MESSAGE HANDLER START ===
-
-    if mode == "diesel_receive_reject_note":
-        if (
-            update.message.photo
-            or update.message.video
-            or update.message.video_note
-            or update.message.audio
-            or update.message.voice
-            or update.message.document
-            or update.message.sticker
-            or not is_valid_note(text)
-        ):
-            await update.message.reply_text(
-                "❌ Нотўғри маълумот.\\n\\n📝 Рад этиш сабабини текст кўринишида ёзинг."
-            )
-            return
-
-        transfer_id = context.user_data.get("diesel_reject_transfer_id")
-        reason = text
-
-        cursor.execute("""
-            UPDATE diesel_transfers
-            SET status = %s,
-                receiver_comment = %s,
-                answered_at = NOW()
-            WHERE id = %s
-        """, ("Рад этилди", reason, transfer_id))
-
-        conn.commit()
-
-        await notify_diesel_sender_rejected(context, transfer_id, reason)
-
-        await update.message.reply_text("❌ Маълумот рад этилди ва дизел берган ҳайдовчига юборилди.")
-
-        context.user_data.clear()
-        return
 
 # === DIESEL RECEIVER REJECT MESSAGE HANDLER END ===
 
