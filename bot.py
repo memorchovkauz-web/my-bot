@@ -2228,6 +2228,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
+            await notify_diesel_receiver_rejected(context, transfer_id, text)
+
             driver_car = get_driver_car(update.effective_user.id)
             fuel_type = get_car_fuel_type(driver_car)
 
@@ -4182,21 +4184,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data.startswith("diesel_rejected_view|"):
-        await diesel_rejected_view(update, context)
-        return
     
-    if data.startswith("diesel_receiver_rejected_view|"):
-        await diesel_receiver_rejected_view(update, context)
-        return
     
-    if data.startswith("diesel_rejected_resend|"):
-        await diesel_rejected_resend(update, context)
-        return
     
-    if data.startswith("diesel_rejected_cancel|"):
-        await diesel_rejected_cancel(update, context)
-        return
 
     if data.startswith("diesel_receiver_rejected_accept|"):
         transfer_id = data.split("|", 1)[1]
