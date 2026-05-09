@@ -1122,6 +1122,17 @@ def fuel_gas_final_keyboard():
         ]
     ])
 
+def fuel_gas_after_action_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data="fuel_gas_confirm"),
+            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="fuel_gas_edit"),
+        ],
+        [
+            InlineKeyboardButton("❌ Отмен", callback_data="fuel_gas_cancel"),
+        ]
+    ])
+
 
 def fuel_gas_edit_keyboard():
     return InlineKeyboardMarkup([
@@ -1132,6 +1143,7 @@ def fuel_gas_edit_keyboard():
 
 
 def fuel_gas_confirm_text(context):
+    
     return (
         "✅ ГАЗ ОЛИШ МАЪЛУМОТЛАРИ\n\n"
         f"🚛 Техника: {context.user_data.get('fuel_car')}\n"
@@ -2986,7 +2998,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             fuel_gas_confirm_text(context),
-            reply_markup=fuel_gas_final_keyboard()
+            reply_markup=fuel_gas_after_action_keyboard()
         )
         return
 
@@ -3767,6 +3779,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "fuel_gas_view":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
         await query.message.reply_text(fuel_gas_confirm_text(context))
 
         video_id = context.user_data.get("fuel_video_id")
@@ -3778,9 +3795,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if photo_id:
             await safe_send_photo(context.bot, query.message.chat_id, photo_id)
 
+        await query.message.reply_text(
+            "Маълумотни тасдиқлайсизми?",
+            reply_markup=fuel_gas_after_action_keyboard()
+        )
         return
 
     if data == "fuel_gas_edit":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
         await query.message.reply_text(
             "✏️ Қайси маълумотни таҳрирлайсиз?",
             reply_markup=fuel_gas_edit_keyboard()
@@ -3788,6 +3814,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "fuel_gas_edit_km":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         context.user_data["mode"] = "fuel_gas_edit_km"
         await query.message.reply_text(
             "📍 Янги спидометр кўрсаткичини киритинг.\n\nМисол: 15300"
@@ -3795,6 +3826,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "fuel_gas_edit_video":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         context.user_data["mode"] = "fuel_gas_edit_video"
         await query.message.reply_text(
             "🎥 Янги видео юборинг.\n\nАвтомобил рақами ва калонка кўрсаткичи кўринсин."
@@ -3802,6 +3838,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "fuel_gas_edit_photo":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         context.user_data["mode"] = "fuel_gas_edit_photo"
         await query.message.reply_text(
             "📷 Янги ведомость расмини юборинг."
@@ -3809,6 +3850,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "fuel_gas_cancel":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         context.user_data.clear()
         context.user_data["mode"] = "fuel_menu"
         await query.message.reply_text(
@@ -3818,6 +3864,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "fuel_gas_confirm":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+            
         user_id = update.effective_user.id
 
         cursor.execute("""
@@ -5943,7 +5994,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             fuel_gas_confirm_text(context),
-            reply_markup=fuel_gas_final_keyboard()
+            reply_markup=fuel_gas_after_action_keyboard()
         )
         return
 
@@ -6180,7 +6231,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text(
                 fuel_gas_confirm_text(context),
-                reply_markup=fuel_gas_final_keyboard()
+                reply_markup=fuel_gas_after_action_keyboard()
             )
             return
 
