@@ -832,7 +832,8 @@ def diesel_give_final_keyboard():
         [
             InlineKeyboardButton("✅ Тасдиқлаш", callback_data="dieselgive_confirm"),
             InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="dieselgive_edit")
-        ]
+        ],
+        [InlineKeyboardButton("❌ Отмен", callback_data="dieselgive_cancel")]
     ])
 
 
@@ -3857,9 +3858,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
-
+    
         transfer_id = data.split("|", 1)[1]
-
+    
         cursor.execute("""
             SELECT
                 from_driver_id,
@@ -3872,28 +3873,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             FROM diesel_transfers
             WHERE id = %s
         """, (transfer_id,))
-
+    
         row = cursor.fetchone()
-
+    
         if not row:
             await query.message.reply_text("❌ Маълумот топилмади.")
             return
-
+    
         from_driver_id, from_car, to_car, firm, liter, note, video_id = row
-
+    
         if int(update.effective_user.id) != int(from_driver_id):
             await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
             return
-
+    
         context.user_data["diesel_edit_rejected_id"] = transfer_id
-        context.user_data["dieselgive_from_car"] = from_car
-        context.user_data["dieselgive_to_car"] = to_car
-        context.user_data["dieselgive_firm"] = firm
-        context.user_data["dieselgive_liter"] = liter
-        context.user_data["dieselgive_note"] = note
-        context.user_data["dieselgive_video_id"] = video_id
+        context.user_data["dieselgive_from_car"] = from_car or ""
+        context.user_data["dieselgive_to_car"] = to_car or ""
+        context.user_data["dieselgive_firm"] = firm or ""
+        context.user_data["dieselgive_liter"] = liter or ""
+        context.user_data["dieselgive_note"] = note or ""
+        context.user_data["dieselgive_video_id"] = video_id or ""
         context.user_data["mode"] = "dieselgive_edit_menu"
-
+    
         await query.message.reply_text(
             "✏️ Қайси маълумотни таҳрирлайсиз?",
             reply_markup=diesel_give_edit_keyboard()
@@ -4295,13 +4296,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             cursor.execute("""
                 UPDATE diesel_transfers
-                SET liter = %s,
+                SET from_car = %s,
+                    to_car = %s,
+                    firm = %s,
+                    liter = %s,
                     note = %s,
                     video_id = %s,
                     status = %s,
                     receiver_comment = NULL,
                     answered_at = NULL
                 WHERE id = %s
+            """, (
+                from_car,
+                to_car,
+                firm,
+                liter,
+                note,
+                video_id,
+                "Қабул қилувчи текширувида",
+                rejected_transfer_id
+            ))
             """, (
                 liter,
                 note,
@@ -4779,7 +4793,34 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
     )
 
 
-# === DIESEL RECEIVER CONFIRM FLOW CALLBACKS END ===
+    if data == "dieselgive_cancel":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+    
+        context.user_data.clear()
+    
+        await query.message.reply_text(
+            "❌ Дизел маълумоти бекор қилинди.",
+            reply_markup=diesel_report_keyboard()
+        )
+        return
+
+
+    if data == "dieselgive_edit":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+    
+        context.user_data["mode"] = "dieselgive_edit_menu"
+    
+        await query.message.reply_text(
+            "✏️ Қайси маълумотни таҳрирлайсиз?",
+            reply_markup=diesel_give_edit_keyboard()
+        )
+        return
 
 
     if data == "dieselgive_edit":
