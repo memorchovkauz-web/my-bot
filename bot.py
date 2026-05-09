@@ -3700,6 +3700,65 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    if data == "gasgive_confirm":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        from_car = context.user_data.get("gasgive_from_car")
+        to_car = context.user_data.get("gasgive_to_car")
+        firm = context.user_data.get("gasgive_firm")
+        note = context.user_data.get("gasgive_note")
+        video_id = context.user_data.get("gasgive_video_id")
+        user_id = update.effective_user.id
+
+        receiver = get_driver_by_car(to_car)
+
+        if not receiver:
+            await query.message.reply_text("❌ Газ оладиган техника ҳайдовчиси топилмади.")
+            return
+
+        to_driver_id = receiver[0]
+
+        cursor.execute("""
+            INSERT INTO gas_transfers (
+                from_driver_id,
+                from_car,
+                to_driver_id,
+                to_car,
+                firm,
+                note,
+                video_id,
+                status
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            user_id,
+            from_car,
+            to_driver_id,
+            to_car,
+            firm,
+            note,
+            video_id,
+            "Қабул қилувчи текширувида"
+        ))
+
+        transfer_id = cursor.fetchone()[0]
+        conn.commit()
+
+        await send_gas_transfer_to_receiver(context, transfer_id)
+
+        await query.message.reply_text(
+            "✅ Газ бериш маълумоти базага сақланди ва олувчи ҳайдовчига юборилди.",
+            reply_markup=fuel_menu_keyboard()
+        )
+
+        context.user_data.clear()
+        context.user_data["mode"] = "fuel_menu"
+        return
+
     if data == "dieselgive_cancel":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
