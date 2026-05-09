@@ -2335,8 +2335,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_valid_gas_note(text):
             await update.message.reply_text("❌ Сабаб нотўғри. Фақат ҳарф ва рақам киритинг.")
             return
-
-        transfer_id = context.user_data.get("diesel_receive_reject_id")
+    
+        transfer_id = context.user_data.get("diesel_reject_transfer_id")
 
         cursor.execute("""
             UPDATE diesel_transfers
@@ -2362,8 +2362,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"📝 Сабаб: {text}"
                     )
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                print("DIESEL REJECT SEND ERROR:", e)
 
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
