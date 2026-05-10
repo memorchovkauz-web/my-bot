@@ -613,6 +613,13 @@ def firm_keyboard():
     )
 
 
+def firm_back_keyboard():
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(name)] for name in FIRM_NAMES] + [[KeyboardButton("⬅️ Орқага")]],
+        resize_keyboard=True
+    )
+
+
 def action_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🔧 Ремонтга қўшиш")],
@@ -629,13 +636,31 @@ def technadzor_keyboard():
         [KeyboardButton("📚 История")],
     ], resize_keyboard=True)
 
+def pending_registration_count():
+    try:
+        cursor.execute("SELECT COUNT(*) FROM drivers WHERE status = %s", ("Текширувда",))
+        row = cursor.fetchone()
+        return int(row[0] or 0)
+    except Exception as e:
+        print("PENDING REGISTRATION COUNT ERROR:", e)
+        return 0
+
+
 def technadzor_staff_menu_keyboard():
-    return ReplyKeyboardMarkup([
+    pending_count = pending_registration_count()
+
+    rows = [
         [KeyboardButton("🚚 Ҳайдовчилар")],
         [KeyboardButton("🔧 Механиклар")],
         [KeyboardButton("⛽ Заправщиклар")],
-        [KeyboardButton("⬅️ Орқага")],
-    ], resize_keyboard=True)
+    ]
+
+    if pending_count > 0:
+        rows.append([KeyboardButton(f"📝 Регистрация ({pending_count})")])
+
+    rows.append([KeyboardButton("⬅️ Орқага")])
+
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def technadzor_staff_firms_reply_keyboard():
@@ -863,6 +888,60 @@ def technadzor_staff_list_inline_keyboard(staff_type, firm=None):
         buttons.append([InlineKeyboardButton(button_text[:60], callback_data=f"tz_staff_view|{driver_id}")])
 
     return InlineKeyboardMarkup(buttons)
+
+
+
+def technadzor_pending_registration_keyboard():
+    try:
+        cursor.execute("""
+            SELECT id, name, surname, firm, car, status, COALESCE(work_role, 'driver')
+            FROM drivers
+            WHERE status = 'Текширувда'
+            ORDER BY
+                CASE
+                    WHEN COALESCE(work_role, 'driver') = 'zapravshik' THEN 'Умумий'
+                    ELSE COALESCE(NULLIF(firm, ''), 'Фирма йўқ')
+                END,
+                surname,
+                name
+        """)
+        rows = cursor.fetchall()
+    except Exception as e:
+        print("TECHNADZOR PENDING REGISTRATION ERROR:", e)
+        rows = []
+
+    if not rows:
+        return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Текширувда ходим йўқ", callback_data="none")]])
+
+    buttons = []
+    current_group = None
+
+    for row in rows:
+        driver_id, name, surname, firm, car, status, work_role = row
+        group_name = "Умумий" if (work_role or "driver") == "zapravshik" else (firm or "Фирма йўқ")
+
+        if group_name != current_group:
+            current_group = group_name
+            buttons.append([InlineKeyboardButton(f"🏢 {group_name}", callback_data="none")])
+
+        buttons.append([
+            InlineKeyboardButton(
+                staff_list_button_text(row)[:60],
+                callback_data=f"tz_reg_view|{driver_id}"
+            )
+        ])
+
+    return InlineKeyboardMarkup(buttons)
+
+
+def technadzor_pending_registration_card_keyboard(driver_id):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"approve_driver|{driver_id}"),
+            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"tz_staff_edit|{driver_id}"),
+        ],
+        [InlineKeyboardButton("❌ Рад этиш", callback_data=f"reject_driver|{driver_id}")]
+    ])
 
 
 def technadzor_staff_card_text(driver_id):
@@ -4513,6 +4592,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if role == "technadzor":
+        if text == "⬅️ Орқага" and mode in ["select_firm_for_add", "technadzor_staff_menu"]:
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            context.user_data.clear()
+            await update.message.reply_text(
+                "👮 Текширувчи менюси",
+                reply_markup=technadzor_keyboard()
+            )
+            return
+
+        if text == "⬅️ Орқага" and mode in [
+            "technadzor_registration_list",
+            "technadzor_staff_drivers_firm",
+            "technadzor_staff_drivers_list",
+            "technadzor_staff_mechanics_list",
+            "technadzor_staff_zapravshik_list",
+        ]:
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            context.user_data["mode"] = "technadzor_staff_menu"
+            await update.message.reply_text(
+                "👥 Ходимлар менюси",
+                reply_markup=technadzor_staff_menu_keyboard()
+            )
+            return
+
         if text == "👥 Ходимлар":
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             context.user_data["mode"] = "technadzor_staff_menu"
@@ -4566,6 +4669,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
                 return
 
+            if text.startswith("📝 Регистрация"):
+                await clear_technadzor_staff_inline(context, update.effective_chat.id)
+                context.user_data["mode"] = "technadzor_registration_list"
+                context.user_data["technadzor_staff_action_stack"] = []
+                await update.message.reply_text(
+                    "📝 Регистрация текшируви",
+                    reply_markup=technadzor_staff_back_reply_keyboard()
+                )
+                msg = await update.message.reply_text(
+                    "Текширувда турган ходимлар:",
+                    reply_markup=technadzor_pending_registration_keyboard()
+                )
+                context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                return
+
         if mode == "technadzor_staff_drivers_firm" and text in FIRM_NAMES:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             context.user_data["mode"] = "technadzor_staff_drivers_list"
@@ -4586,7 +4704,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "🔧 Ремонтга қўшиш":
             context.user_data.clear()
             context.user_data["mode"] = "select_firm_for_add"
-            await update.message.reply_text("🔴 <b>Фирмани танланг:</b>", parse_mode="HTML", reply_markup=firm_keyboard())
+            await update.message.reply_text("🔴 <b>Фирмани танланг:</b>", parse_mode="HTML", reply_markup=firm_back_keyboard())
             return
 
         if text == "☑️ Ремонтдан чиқишини тасдиқлаш":
@@ -5077,6 +5195,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("approve_driver|") or data.startswith("reject_driver|"):
         active_inline_allowed = True
 
+    if data.startswith("tz_reg"):
+        active_inline_allowed = current_mode in [
+            "technadzor_registration_list",
+            "technadzor_staff_card",
+        ]
+
     if data.startswith("tz_staff"):
         active_inline_allowed = current_mode in [
             "technadzor_staff_menu",
@@ -5134,6 +5258,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             technadzor_staff_list_text(staff_type, firm),
             reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
+        )
+        return
+
+    if data.startswith("tz_reg_view|"):
+        driver_id = data.split("|", 1)[1]
+        context.user_data["mode"] = "technadzor_staff_card"
+        context.user_data["technadzor_selected_staff_id"] = driver_id
+        await query.edit_message_text(
+            technadzor_staff_card_text(driver_id),
+            reply_markup=technadzor_pending_registration_card_keyboard(driver_id)
         )
         return
 
@@ -7201,18 +7335,33 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if data.startswith("approve_driver|"):
-        driver_id = data.split("|")[1]
+        driver_ref = data.split("|")[1]
 
-        update_driver_status(driver_id, "Тасдиқланди")
-        rows = drivers_ws.get_all_values()
+        staff = get_staff_by_id(driver_ref)
+        if staff:
+            db_id = staff["id"]
+            telegram_id = staff["telegram_id"]
+        else:
+            db_id = None
+            telegram_id = driver_ref
 
-        for i, row in enumerate(rows, start=1):
-            if len(row) > 0 and row[0] == str(driver_id):
-                drivers_ws.update_cell(i, 7, "Тасдиқланди")
-                break
+        if db_id:
+            cursor.execute("UPDATE drivers SET status = %s WHERE id = %s", ("Тасдиқланди", db_id))
+            conn.commit()
+        else:
+            update_driver_status(telegram_id, "Тасдиқланди")
 
         try:
-            approved_role = get_driver_work_role(driver_id)
+            rows = drivers_ws.get_all_values()
+            for i, row in enumerate(rows, start=1):
+                if len(row) > 0 and str(row[0]) == str(telegram_id):
+                    drivers_ws.update_cell(i, 7, "Тасдиқланди")
+                    break
+        except Exception as e:
+            print("APPROVE DRIVER SHEET ERROR:", e)
+
+        try:
+            approved_role = staff["work_role"] if staff else get_driver_work_role(telegram_id)
 
             if approved_role == "mechanic":
                 approved_text = "✅ Механик сифатида маълумотларингиз тасдиқланди.\n/start босинг."
@@ -7222,9 +7371,14 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
                 approved_text = "✅ Ҳайдовчи сифатида маълумотларингиз тасдиқланди.\n/start босинг."
 
             await context.bot.send_message(
-                chat_id=int(driver_id),
+                chat_id=int(telegram_id),
                 text=approved_text
             )
+        except Exception as e:
+            print("APPROVE DRIVER NOTIFY ERROR:", e)
+
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
 
@@ -7232,21 +7386,41 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if data.startswith("reject_driver|"):
-        driver_id = data.split("|")[1]
+        driver_ref = data.split("|")[1]
 
-        update_driver_status(driver_id, "Рад этилди")
-        rows = drivers_ws.get_all_values()
+        staff = get_staff_by_id(driver_ref)
+        if staff:
+            db_id = staff["id"]
+            telegram_id = staff["telegram_id"]
+        else:
+            db_id = None
+            telegram_id = driver_ref
 
-        for i, row in enumerate(rows, start=1):
-            if len(row) > 0 and row[0] == str(driver_id):
-                drivers_ws.update_cell(i, 7, "Рад этилди")
-                break
+        if db_id:
+            cursor.execute("UPDATE drivers SET status = %s WHERE id = %s", ("Рад этилди", db_id))
+            conn.commit()
+        else:
+            update_driver_status(telegram_id, "Рад этилди")
+
+        try:
+            rows = drivers_ws.get_all_values()
+            for i, row in enumerate(rows, start=1):
+                if len(row) > 0 and str(row[0]) == str(telegram_id):
+                    drivers_ws.update_cell(i, 7, "Рад этилди")
+                    break
+        except Exception as e:
+            print("REJECT DRIVER SHEET ERROR:", e)
 
         try:
             await context.bot.send_message(
-                chat_id=int(driver_id),
+                chat_id=int(telegram_id),
                 text="❌ Маълумотларингиз рад этилди.\nАдминистратор билан боғланинг."
             )
+        except Exception as e:
+            print("REJECT DRIVER NOTIFY ERROR:", e)
+
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
 
@@ -7317,35 +7491,9 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
                         
         for tech_id in get_user_ids_by_role("technadzor"):
             try:
-                work_role = context.user_data.get("driver_work_role", "driver")
-                employee_text = (
-                    "👤 Янги ходим рўйхатдан ўтди:\n\n"
-                    f"👤 Лавозим: {work_role_title(work_role)}\n"
-                    f"👤 Исм: {context.user_data.get('driver_name', '')}\n"
-                    f"👤 Фамилия: {context.user_data.get('driver_surname', '')}\n"
-                    f"📞 Телефон: {context.user_data.get('phone', '')}\n"
-                )
-
-                if work_role == "mechanic":
-                    employee_text += f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
-
-                if work_role == "driver":
-                    employee_text += (
-                        f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
-                        f"🚛 Техника: {context.user_data.get('driver_car', '')}\n"
-                    )
-
-                employee_text += "\nТасдиқлайсизми?"
-
                 await context.bot.send_message(
                     chat_id=tech_id,
-                    text=employee_text,
-                    reply_markup=InlineKeyboardMarkup([
-                        [
-                            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"approve_driver|{user_id}"),
-                            InlineKeyboardButton("❌ Рад этиш", callback_data=f"reject_driver|{user_id}")
-                        ]
-                    ])
+                    text="👤 Янги ходим рўйхатдан ўтди.\n\nТекшириш учун: 👥 Ходимлар → Регистрация менюсига киринг."
                 )
             except Exception:
                 pass
