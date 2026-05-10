@@ -131,23 +131,6 @@ CREATE TABLE IF NOT EXISTS diesel_prihod (
 )
 """)
 
-def safe_alter_table(sql):
-    try:
-        cursor.execute("SET statement_timeout = '10s'")
-        cursor.execute("SET lock_timeout = '5s'")
-        cursor.execute(sql)
-        cursor.execute("RESET statement_timeout")
-        cursor.execute("RESET lock_timeout")
-    except Exception as e:
-        print(f"[DB MIGRATION WARNING] {sql} failed: {e}")
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-
-
-safe_alter_table("ALTER TABLE diesel_prihod ADD COLUMN IF NOT EXISTS receiver_comment TEXT")
-safe_alter_table("ALTER TABLE diesel_prihod ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP")
 
 conn.commit()
 
@@ -1544,7 +1527,7 @@ def diesel_prihod_card_text(context, status="Текширувда", receiver_com
 
 def diesel_prihod_row_to_context(record_id, context):
     cursor.execute("""
-        SELECT id, telegram_id, liter, note, video_id, photo_id, status, receiver_comment, created_at
+        SELECT id, telegram_id, liter, note, video_id, photo_id, status, created_at
         FROM diesel_prihod
         WHERE id = %s
         LIMIT 1
@@ -1554,15 +1537,22 @@ def diesel_prihod_row_to_context(record_id, context):
     if not row:
         return None
 
+    note_text = row[3] or ""
+    receiver_comment = ""
+    if "\nРад изоҳи: " in note_text:
+        parts = note_text.split("\nРад изоҳи: ", 1)
+        note_text = parts[0]
+        receiver_comment = parts[1]
+
     context.user_data["diesel_prihod_id"] = row[0]
     context.user_data["diesel_prihod_telegram_id"] = row[1]
     context.user_data["diesel_prihod_liter"] = str(row[2])
-    context.user_data["diesel_prihod_note"] = row[3] or ""
+    context.user_data["diesel_prihod_note"] = note_text
     context.user_data["diesel_prihod_video_id"] = row[4]
     context.user_data["diesel_prihod_photo_id"] = row[5]
     context.user_data["diesel_prihod_status"] = row[6] or ""
-    context.user_data["diesel_prihod_receiver_comment"] = row[7] or ""
-    context.user_data["diesel_prihod_time"] = row[8].strftime("%Y-%m-%d %H:%M:%S") if row[8] else now_text()
+    context.user_data["diesel_prihod_receiver_comment"] = receiver_comment
+    context.user_data["diesel_prihod_time"] = row[7].strftime("%Y-%m-%d %H:%M:%S") if row[7] else now_text()
 
     return row
 
@@ -3814,9 +3804,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cursor.execute("""
                 UPDATE diesel_prihod
-                SET status = %s, receiver_comment = %s, answered_at = NOW()
+                SET status = %s,
+                    note = COALESCE(note, '') || %s
                 WHERE id = %s
-            """, ("Қайтди", text.strip(), int(record_id)))
+            """, ("Қайтди", "\nРад изоҳи: " + text.strip(), int(record_id)))
             conn.commit()
         except Exception as e:
             print("DIESEL PRIHOD REJECT SAVE ERROR:", e)
@@ -5940,7 +5931,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cursor.execute("""
                 UPDATE diesel_prihod
-                SET status = %s, answered_at = NOW()
+                SET status = %s
                 WHERE id = %s
             """, ("Тасдиқланди", int(record_id)))
             conn.commit()
@@ -6022,7 +6013,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cursor.execute("""
                 UPDATE diesel_prihod
-                SET status = %s, receiver_comment = NULL, answered_at = NULL
+                SET status = %s,
+                    note = regexp_replace(COALESCE(note, ''), E'\\nРад изоҳи: .*$', '')
                 WHERE id = %s
             """, ("Текширувда", int(record_id)))
             conn.commit()
