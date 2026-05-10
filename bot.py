@@ -3994,7 +3994,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if text.startswith("⛽ Дизел приход"):
                 context.user_data["mode"] = "technadzor_diesel_prihod_list"
-                await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=only_back_keyboard())
+                await update.message.reply_text("⛽ Текширувда турган дизел приходлар:", reply_markup=only_back_keyboard())
                 msg = await update.message.reply_text("⛽ Текширувда турган дизел приходлар:", reply_markup=diesel_prihod_pending_keyboard())
                 remember_inline_message(context, msg)
                 return
