@@ -340,6 +340,7 @@ def sync_drivers_to_db():
             firm = row[4].strip() if len(row) > 4 else ""
             car = row[5].strip() if len(row) > 5 else ""
             status = row[6].strip() if len(row) > 6 else ""
+            work_role = row[8].strip() if len(row) > 8 and row[8].strip() else "driver"
 
             if not telegram_id:
                 continue
@@ -352,9 +353,10 @@ def sync_drivers_to_db():
                     phone,
                     firm,
                     car,
-                    status
+                    status,
+                    work_role
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (telegram_id)
                 DO UPDATE SET
                     name = EXCLUDED.name,
@@ -362,7 +364,16 @@ def sync_drivers_to_db():
                     phone = EXCLUDED.phone,
                     firm = EXCLUDED.firm,
                     car = EXCLUDED.car,
-                    status = EXCLUDED.status
+                    work_role = CASE
+                        WHEN COALESCE(drivers.work_role, '') <> '' THEN drivers.work_role
+                        ELSE EXCLUDED.work_role
+                    END,
+                    status = CASE
+                        WHEN TRIM(COALESCE(drivers.status, '')) IN ('Тасдиқланди', 'Рад этилди')
+                             AND TRIM(COALESCE(EXCLUDED.status, '')) = 'Текширувда'
+                        THEN drivers.status
+                        ELSE EXCLUDED.status
+                    END
             """, (
                 int(telegram_id),
                 name,
@@ -370,7 +381,8 @@ def sync_drivers_to_db():
                 phone,
                 firm,
                 car,
-                status
+                status,
+                work_role
             ))
 
         except Exception as e:
@@ -485,7 +497,7 @@ def get_role(update):
             return None
 
         work_role = row[0] or "driver"
-        status = row[1] or ""
+        status = (row[1] or "").strip()
 
         if status != "Тасдиқланди":
             return None
@@ -1315,7 +1327,6 @@ def sync_driver_status_to_sheet(telegram_id, status):
         for i, row in enumerate(rows, start=1):
             if len(row) > 0 and str(row[0]) == str(telegram_id):
                 drivers_ws.update_cell(i, 7, status)
-                return
     except Exception as e:
         print("SYNC DRIVER STATUS TO SHEET ERROR:", e)
 
@@ -5870,6 +5881,42 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "none":
         return
 
+    # === PRIORITY FIX: дизел приход рўйхатидан карточкани очиш ===
+    if data.startswith("diesel_prihod_view|"):
+        context.user_data["inline_disabled_by_start"] = False
+        context.user_data["mode"] = "technadzor_diesel_prihod_card"
+
+        record_id = data.split("|", 1)[1]
+
+        if not diesel_prihod_row_to_context(record_id, context):
+            await query.answer("Маълумот топилмади.", show_alert=True)
+            return
+
+        card_text = diesel_prihod_card_text(
+            context,
+            status=context.user_data.get("diesel_prihod_status", "Текширувда"),
+            receiver_comment=context.user_data.get("diesel_prihod_receiver_comment")
+        )
+
+        try:
+            await query.edit_message_text(
+                card_text,
+                reply_markup=diesel_prihod_technadzor_keyboard(record_id)
+            )
+        except Exception as e:
+            print("DIESEL PRIHOD VIEW EDIT ERROR:", e)
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            await query.message.reply_text(
+                card_text,
+                reply_markup=diesel_prihod_technadzor_keyboard(record_id)
+            )
+
+        return
+
     # === Заправщик/Текширувчи: дизел приход callbacks ===
     if data.startswith("diesel_prihod_tech_edit|") or data.startswith("diesel_prihod_return_edit|"):
         parts = data.split("|")
@@ -6535,6 +6582,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_inline_allowed = True
 
     if data.startswith("approve_driver|") or data.startswith("reject_driver|"):
+        active_inline_allowed = True
+
+    if data.startswith("diesel_prihod_"):
         active_inline_allowed = True
 
     if data.startswith("tz_reg") or data.startswith("tz_reg_approve|") or data.startswith("tz_reg_reject|"):
