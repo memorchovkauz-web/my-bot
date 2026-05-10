@@ -828,7 +828,43 @@ def technadzor_staff_firms_keyboard(staff_type):
     return InlineKeyboardMarkup(buttons)
 
 
+
+def remember_inline_message(context, msg):
+    try:
+        if msg and getattr(msg, "message_id", None):
+            ids = context.user_data.setdefault("all_inline_message_ids", [])
+            if msg.message_id not in ids:
+                ids.append(msg.message_id)
+    except Exception as e:
+        print("REMEMBER INLINE MESSAGE ERROR:", e)
+
+
+async def clear_all_inline_messages(context, chat_id):
+    try:
+        ids = list(context.user_data.get("all_inline_message_ids", []))
+
+        for key in ["technadzor_staff_message_id", "technadzor_staff_inline_message_id"]:
+            value = context.user_data.get(key)
+            if value and value not in ids:
+                ids.append(value)
+
+        for msg_id in ids:
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=chat_id,
+                    message_id=int(msg_id),
+                    reply_markup=None
+                )
+            except Exception:
+                pass
+
+        context.user_data["all_inline_message_ids"] = []
+    except Exception as e:
+        print("CLEAR ALL INLINE MESSAGES ERROR:", e)
+
+
 async def clear_technadzor_staff_inline(context, chat_id):
+    await clear_all_inline_messages(context, chat_id)
     message_ids = []
     for key in ["technadzor_staff_message_id", "technadzor_staff_inline_message_id"]:
         value = context.user_data.get(key)
@@ -1196,6 +1232,7 @@ async def technadzor_show_pending_or_staff_card(message, context, driver_id, tex
         reply_markup=technadzor_staff_card_reply_markup(driver_id)
     )
     context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+    remember_inline_message(context, msg)
     return msg
 
 
@@ -1562,14 +1599,14 @@ async def send_diesel_prihod_to_technadzor(context, record_id):
     if not row:
         return
 
-    card_text = diesel_prihod_card_text(context, status="Текширувда")
-
+    # Асосий экранда фақат огоҳлантириш боради.
+    # Карточка ва тасдиқ/таҳрир/рад этиш фақат:
+    # 🔔 Уведомления → ⛽ Дизел приход менюси ичида очилади.
     for tech_id in get_user_ids_by_role("technadzor"):
         try:
             await context.bot.send_message(
                 chat_id=int(tech_id),
-                text=card_text,
-                reply_markup=diesel_prihod_technadzor_keyboard(record_id)
+                text="🔔 Уведомления\n⛽ Дизел приход"
             )
         except Exception as e:
             print("SEND DIESEL PRIHOD TO TECHNADZOR ERROR:", e)
@@ -3440,6 +3477,9 @@ async def clear_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if get_role(update) == "technadzor":
+        await clear_all_inline_messages(context, update.effective_chat.id)
+
     context.user_data.clear()
     context.user_data["history"] = []
 
@@ -3672,6 +3712,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
 
+    if text == "⬅️ Орқага" and get_role(update) == "technadzor":
+        await clear_all_inline_messages(context, update.effective_chat.id)
+
     # === PRIORITY: Текширувчи регистрация таҳриридан орқага ===
     # Эски ходимлар/фирма flow'га тушиб кетмаслиги учун энг юқорида ушлаймиз.
     if get_role(update) == "technadzor" and text == "⬅️ Орқага" and mode in [
@@ -3697,6 +3740,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=technadzor_pending_registration_keyboard()
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            remember_inline_message(context, msg)
             return
 
         context.user_data["mode"] = "technadzor_registration_list"
@@ -3706,6 +3750,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=technadzor_pending_registration_keyboard()
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+        remember_inline_message(context, msg)
         return
 
     # === Заправщик: дизел приход text flow ===
@@ -3880,6 +3925,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=technadzor_pending_registration_keyboard()
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            remember_inline_message(context, msg)
             return
 
         context.user_data["mode"] = "technadzor_staff_menu"
@@ -3936,18 +3982,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=technadzor_pending_registration_keyboard()
                 )
                 context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                remember_inline_message(context, msg)
                 return
 
             if text.startswith("🛠 Ремонтдан чиқариш"):
                 context.user_data["mode"] = "confirm_exit"
                 await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=only_back_keyboard())
-                await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
+                msg = await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
+                remember_inline_message(context, msg)
                 return
 
             if text.startswith("⛽ Дизел приход"):
                 context.user_data["mode"] = "technadzor_diesel_prihod_list"
                 await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=only_back_keyboard())
-                await update.message.reply_text("⛽ Текширувда турган дизел приходлар:", reply_markup=diesel_prihod_pending_keyboard())
+                msg = await update.message.reply_text("⛽ Текширувда турган дизел приходлар:", reply_markup=diesel_prihod_pending_keyboard())
+                remember_inline_message(context, msg)
                 return
 
         if text == "🔧 Ремонтга қўшиш":
@@ -5009,6 +5058,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=technadzor_pending_registration_keyboard()
                 )
                 context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                remember_inline_message(context, msg)
                 return
 
             context.user_data["mode"] = "technadzor_staff_card"
@@ -5017,6 +5067,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=technadzor_staff_card_reply_markup(driver_id)
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            remember_inline_message(context, msg)
             return
 
         if mode == "technadzor_staff_card":
@@ -5033,6 +5084,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            remember_inline_message(context, msg)
             return
 
         if mode == "technadzor_staff_menu":
@@ -5277,6 +5329,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+        remember_inline_message(context, msg)
         return
 
 
@@ -5309,6 +5362,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+        remember_inline_message(context, msg)
         return
 
     if mode == "technadzor_staff_edit_role":
@@ -5340,6 +5394,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=technadzor_staff_card_reply_markup(driver_id)
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            remember_inline_message(context, msg)
             return
 
         # Ҳайдовчи ва механик регистрациясида фирма танланади.
@@ -5398,6 +5453,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+        remember_inline_message(context, msg)
         return
 
     if mode == "technadzor_staff_edit_car":
@@ -5439,6 +5495,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+        remember_inline_message(context, msg)
         return
 
     if role == "technadzor" and text == "⬅️ Орқага" and mode == "technadzor_registration_after_decision":
@@ -5464,6 +5521,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=technadzor_pending_registration_keyboard()
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            remember_inline_message(context, msg)
             return
 
         context.user_data["mode"] = "technadzor_staff_menu"
@@ -5500,6 +5558,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=technadzor_pending_registration_keyboard()
                 )
                 context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                remember_inline_message(context, msg)
                 return
 
             # Агар тасдиқлаш/рад этиш босилган бўлса:
@@ -5522,6 +5581,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
                 context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                remember_inline_message(context, msg)
                 return
 
             context.user_data["mode"] = "technadzor_staff_menu"
@@ -5591,6 +5651,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=technadzor_staff_list_inline_keyboard("mechanics")
                 )
                 context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                remember_inline_message(context, msg)
                 return
 
             if text == "⛽ Заправщиклар":
@@ -5608,6 +5669,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=technadzor_staff_list_inline_keyboard("zapravshik")
                 )
                 context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                remember_inline_message(context, msg)
                 return
 
             if text.startswith("📝 Регистрация"):
@@ -5624,6 +5686,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=technadzor_pending_registration_keyboard()
                 )
                 context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                remember_inline_message(context, msg)
                 return
 
         if mode == "technadzor_staff_drivers_firm" and extract_firm_from_count_button(text) in FIRM_NAMES:
@@ -5642,6 +5705,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=technadzor_staff_list_inline_keyboard("drivers", firm_name)
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            remember_inline_message(context, msg)
             return
 
         if text == "🔧 Ремонтга қўшиш":
@@ -5652,7 +5716,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if text == "☑️ Ремонтдан чиқишини тасдиқлаш":
             context.user_data["mode"] = "confirm_exit"
-            await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
+            msg = await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
+            remember_inline_message(context, msg)
             return
 
         if text == "📚 История":
@@ -9773,6 +9838,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+        remember_inline_message(context, msg)
         return
 
     context.user_data["inline_disabled_by_start"] = False
