@@ -401,8 +401,17 @@ def is_valid_note(value):
     return bool(value and value.strip()) and len(value.strip()) >= 2
 
 def is_valid_name(value):
-    value = value.strip()
+    value = (value or "").strip()
     return value.isalpha() and len(value) >= 2
+
+
+def is_valid_phone_number(value):
+    phone = (value or "").replace(" ", "").replace("+", "").replace("-", "").strip()
+    return phone.isdigit() and len(phone) == 12 and phone.startswith("998")
+
+
+def clean_phone_number(value):
+    return (value or "").replace(" ", "").replace("+", "").replace("-", "").strip()
 
 
 def calculate_duration(start_time, end_time):
@@ -1259,6 +1268,17 @@ def back_keyboard():
 def phone_keyboard():
     return ReplyKeyboardMarkup(
         [[KeyboardButton("📞 Телефонни юбориш", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+
+def phone_back_keyboard():
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("📞 Телефонни юбориш", request_contact=True)],
+            [KeyboardButton("⬅️ Орқага")],
+        ],
         resize_keyboard=True,
         one_time_keyboard=True
     )
@@ -3993,9 +4013,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode in ["driver_phone", "driver_phone_edit"]:
-        phone = text.replace(" ", "").replace("+", "")
+        phone = clean_phone_number(text)
 
-        if not phone.isdigit() or len(phone) != 12 or not phone.startswith("998"):
+        if not is_valid_phone_number(phone):
             await update.message.reply_text(
                 "❌ Телефон рақам нотўғри.\n\n"
                 "Мисол: 998939992020",
@@ -4388,14 +4408,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if mode in ["technadzor_staff_edit_name", "technadzor_staff_edit_surname", "technadzor_staff_edit_phone", "technadzor_staff_edit_role", "technadzor_staff_edit_firm", "technadzor_staff_edit_car"]:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             driver_id = context.user_data.get("technadzor_selected_staff_id")
+
+            if driver_id and technadzor_rollback_pending_edit(context, driver_id):
+                context.user_data["mode"] = "technadzor_registration_list"
+                await update.message.reply_text(
+                    "↩️ Таҳрирлаш бекор қилинди. Эски маълумотлар тикланди.",
+                    reply_markup=technadzor_staff_back_reply_keyboard()
+                )
+                msg = await update.message.reply_text(
+                    "Текширувда турган ходимлар:",
+                    reply_markup=technadzor_pending_registration_keyboard()
+                )
+                context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                return
+
             context.user_data["mode"] = "technadzor_staff_card"
-            await update.message.reply_text(
-                "✏️ Қайси маълумотни таҳрирлайсиз?",
-                reply_markup=technadzor_staff_back_reply_keyboard()
-            )
             msg = await update.message.reply_text(
-                "✏️ Таҳрирлаш менюси:",
-                reply_markup=technadzor_staff_edit_keyboard(driver_id)
+                technadzor_staff_card_text(driver_id),
+                reply_markup=technadzor_staff_card_reply_markup(driver_id)
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
             return
@@ -4630,8 +4660,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         clean_text = text.strip()
-        if not clean_text or len(clean_text) < 2:
-            await update.message.reply_text("❌ Маълумот нотўғри. Қайта киритинг.", reply_markup=technadzor_staff_back_reply_keyboard())
+        field_title = "Исм" if mode == "technadzor_staff_edit_name" else "Фамилия"
+
+        if not is_valid_name(clean_text):
+            await update.message.reply_text(
+                f"❌ {field_title} фақат ҳарфлардан иборат бўлиши керак.\n\n"
+                "Рақам, символ, расм ёки видео қабул қилинмайди.\n"
+                "Мисол: Али",
+                reply_markup=technadzor_staff_back_reply_keyboard()
+            )
             return
 
         column = "name" if mode == "technadzor_staff_edit_name" else "surname"
@@ -4656,12 +4693,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode == "technadzor_staff_edit_phone":
         driver_id = context.user_data.get("technadzor_selected_staff_id")
-        phone = text.replace(" ", "").replace("+", "")
+        phone = clean_phone_number(text)
 
-        if not phone.isdigit() or len(phone) != 12 or not phone.startswith("998"):
+        if not is_valid_phone_number(phone):
             await update.message.reply_text(
-                "❌ Телефон рақам нотўғри.\n\nМисол: 998939992020",
-                reply_markup=phone_keyboard()
+                "❌ Телефон рақам нотўғри.\n\n"
+                "Фақат 998 билан бошланган 12 та рақам киритинг.\n"
+                "Мисол: 998939992020",
+                reply_markup=phone_back_keyboard()
             )
             return
 
@@ -5699,7 +5738,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if field == "phone":
             context.user_data["mode"] = "technadzor_staff_edit_phone"
-            await query.message.reply_text("📞 Янги телефон рақамни юборинг:", reply_markup=phone_keyboard())
+            await query.message.reply_text("📞 Янги телефон рақамни юборинг:", reply_markup=phone_back_keyboard())
             return
 
         if field == "role":
@@ -8340,6 +8379,14 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mode = context.user_data.get("mode")
+    if mode in ["technadzor_staff_edit_name", "technadzor_staff_edit_surname", "technadzor_staff_edit_phone"]:
+        await update.message.reply_text(
+            "❌ Бу босқичда расм қабул қилинмайди. Маълумотни текст/телефон рақам кўринишида киритинг.",
+            reply_markup=technadzor_staff_back_reply_keyboard()
+        )
+        return
+
 
     mode = context.user_data.get("mode")
 
@@ -8484,6 +8531,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mode = context.user_data.get("mode")
+    if mode in ["technadzor_staff_edit_name", "technadzor_staff_edit_surname", "technadzor_staff_edit_phone"]:
+        await update.message.reply_text(
+            "❌ Бу босқичда видео қабул қилинмайди. Маълумотни текст/телефон рақам кўринишида киритинг.",
+            reply_markup=technadzor_staff_back_reply_keyboard()
+        )
+        return
+
     mode = context.user_data.get("mode")
 
     if mode in ["dieselgive_liter", "dieselgive_edit_liter"]:
@@ -8763,7 +8818,17 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode == "technadzor_staff_edit_phone":
         driver_id = context.user_data.get("technadzor_selected_staff_id")
-        phone = (contact.phone_number or "").replace(" ", "").replace("+", "")
+        phone = clean_phone_number(contact.phone_number)
+
+        if not is_valid_phone_number(phone):
+            await update.message.reply_text(
+                "❌ Телефон рақам нотўғри.\n\n"
+                "Фақат 998 билан бошланган 12 та рақам қабул қилинади.\n"
+                "Мисол: 998939992020",
+                reply_markup=phone_back_keyboard()
+            )
+            return
+
         try:
             cursor.execute("UPDATE drivers SET phone = %s WHERE id = %s", (phone, int(driver_id)))
             conn.commit()
@@ -8771,15 +8836,30 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print("TECHNADZOR STAFF PHONE CONTACT UPDATE ERROR:", e)
             await update.message.reply_text("❌ Сақлашда хато.", reply_markup=technadzor_staff_back_reply_keyboard())
             return
+
         context.user_data["mode"] = "technadzor_staff_card"
         await clear_technadzor_staff_inline(context, update.effective_chat.id)
         await update.message.reply_text("✅ Телефон сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
-        msg = await update.message.reply_text(technadzor_staff_card_text(driver_id), reply_markup=technadzor_staff_card_keyboard(driver_id))
+        msg = await update.message.reply_text(
+            technadzor_staff_card_text(driver_id),
+            reply_markup=technadzor_staff_card_reply_markup(driver_id)
+        )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
         return
 
     context.user_data["inline_disabled_by_start"] = False
-    context.user_data["phone"] = contact.phone_number
+
+    phone = clean_phone_number(contact.phone_number)
+    if not is_valid_phone_number(phone):
+        await update.message.reply_text(
+            "❌ Телефон рақам нотўғри.\n\n"
+            "Фақат 998 билан бошланган 12 та рақам қабул қилинади.\n"
+            "Мисол: 998939992020",
+            reply_markup=phone_keyboard()
+        )
+        return
+
+    context.user_data["phone"] = phone
 
     if mode == "driver_phone_edit":
         context.user_data["mode"] = "driver_confirm"
