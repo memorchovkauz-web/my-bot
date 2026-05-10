@@ -1095,6 +1095,50 @@ async def technadzor_show_pending_or_staff_card(message, context, driver_id, tex
 
 
 
+
+def technadzor_normalize_staff_fields_for_role(driver_id, work_role):
+    """
+    Лавозимга кераксиз майдонларни базадан тозалайди.
+    driver   -> firm/car кейин алоҳида танланади
+    mechanic -> firm керак, car керак эмас
+    zapravshik -> firm/car керак эмас
+    """
+    try:
+        if work_role == "zapravshik":
+            cursor.execute(
+                "UPDATE drivers SET work_role = %s, firm = NULL, car = NULL WHERE id = %s",
+                (work_role, int(driver_id))
+            )
+        elif work_role == "mechanic":
+            cursor.execute(
+                "UPDATE drivers SET work_role = %s, car = NULL WHERE id = %s",
+                (work_role, int(driver_id))
+            )
+        elif work_role == "driver":
+            cursor.execute(
+                "UPDATE drivers SET work_role = %s, firm = NULL, car = NULL WHERE id = %s",
+                (work_role, int(driver_id))
+            )
+        conn.commit()
+        return True
+    except Exception as e:
+        print("TECHNADZOR NORMALIZE ROLE FIELDS ERROR:", e)
+        return False
+
+
+def technadzor_pending_decision_done(context, driver_id):
+    done = context.user_data.setdefault("technadzor_pending_decision_done", {})
+    done[str(driver_id)] = True
+
+
+def technadzor_is_pending_decision_done(context, driver_id):
+    return context.user_data.get("technadzor_pending_decision_done", {}).get(str(driver_id), False)
+
+
+def technadzor_clear_pending_decision_done(context, driver_id):
+    context.user_data.get("technadzor_pending_decision_done", {}).pop(str(driver_id), None)
+
+
 def get_staff_by_telegram_id(telegram_id):
     try:
         cursor.execute("""
@@ -4613,31 +4657,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_role = role_map[text]
         context.user_data["technadzor_staff_pending_role"] = new_role
 
-        try:
-            if new_role == "zapravshik":
-                # Заправщикда фирма ҳам, техника ҳам бўлмайди.
-                cursor.execute(
-                    "UPDATE drivers SET work_role = %s, firm = NULL, car = NULL WHERE id = %s",
-                    (new_role, int(driver_id))
-                )
-            elif new_role == "mechanic":
-                # Механикда фирма бор, техника йўқ.
-                cursor.execute(
-                    "UPDATE drivers SET work_role = %s, car = NULL WHERE id = %s",
-                    (new_role, int(driver_id))
-                )
-            else:
-                # Ҳайдовчида фирма ва техника мажбурий қайта танланади.
-                cursor.execute(
-                    "UPDATE drivers SET work_role = %s, firm = NULL, car = NULL WHERE id = %s",
-                    (new_role, int(driver_id))
-                )
-            conn.commit()
-        except Exception as e:
-            print("TECHNADZOR STAFF ROLE UPDATE ERROR:", e)
+        if not technadzor_normalize_staff_fields_for_role(driver_id, new_role):
             await update.message.reply_text("❌ Сақлашда хато.", reply_markup=technadzor_staff_back_reply_keyboard())
             return
 
+        # Заправщик регистрациясида фирма/техника йўқ — карточкага қайтади.
         if new_role == "zapravshik":
             context.user_data.pop("technadzor_staff_pending_role", None)
             context.user_data["mode"] = "technadzor_staff_card"
@@ -4649,6 +4673,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
             return
 
+        # Ҳайдовчи ва механик регистрациясида фирма танланади.
+        # Ҳайдовчида фирмадан кейин техника ҳам танланади.
         context.user_data["mode"] = "technadzor_staff_edit_firm"
         await update.message.reply_text(
             "✅ Лавозим сақланди. Энди фирмани танланг:",
@@ -4757,22 +4783,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]:
         driver_id = context.user_data.get("technadzor_selected_staff_id")
 
-        if driver_id and technadzor_rollback_pending_edit(context, driver_id):
+        if driver_id:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
+
+            # Агар тасдиқлаш/рад этиш босилмаган бўлса — охирги таҳрирлашдан олдинги маълумотга қайтарилади.
+            if not technadzor_is_pending_decision_done(context, driver_id):
+                rolled_back = technadzor_rollback_pending_edit(context, driver_id)
+                context.user_data["mode"] = "technadzor_registration_list"
+                await update.message.reply_text(
+                    "↩️ Таҳрирлаш бекор қилинди. Эски маълумотлар тикланди." if rolled_back else "↩️ Орқага қайтилди.",
+                    reply_markup=technadzor_staff_back_reply_keyboard()
+                )
+                msg = await update.message.reply_text(
+                    "Текширувда турган ходимлар:",
+                    reply_markup=technadzor_pending_registration_keyboard()
+                )
+                context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                return
+
+            # Агар тасдиқлаш/рад этиш босилган бўлса — фақат битта меню орқага қайтади.
             context.user_data["mode"] = "technadzor_registration_list"
-            await update.message.reply_text("↩️ Таҳрирлаш бекор қилинди. Эски маълумотлар тикланди.", reply_markup=technadzor_staff_back_reply_keyboard())
+            await update.message.reply_text(
+                "📝 Регистрация текшируви",
+                reply_markup=technadzor_staff_back_reply_keyboard()
+            )
             msg = await update.message.reply_text(
                 "Текширувда турган ходимлар:",
                 reply_markup=technadzor_pending_registration_keyboard()
-            )
-            context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
-            return
-
-        if driver_id:
-            await clear_technadzor_staff_inline(context, update.effective_chat.id)
-            msg = await update.message.reply_text(
-                technadzor_staff_card_text(driver_id),
-                reply_markup=technadzor_staff_card_reply_markup(driver_id)
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
             return
@@ -5072,6 +5109,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         technadzor_clear_pending_edit_backup(context, driver_id)
+        technadzor_pending_decision_done(context, driver_id)
         sync_driver_status_to_sheet(staff.get("telegram_id"), new_status)
         await notify_registered_employee(context, staff.get("telegram_id"), new_status, staff.get("work_role", "driver"))
 
@@ -5484,6 +5522,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("tz_reg_view|"):
         driver_id = data.split("|", 1)[1]
+        technadzor_clear_pending_decision_done(context, driver_id)
         context.user_data["mode"] = "technadzor_staff_card"
         context.user_data["technadzor_selected_staff_id"] = driver_id
         await query.edit_message_text(
