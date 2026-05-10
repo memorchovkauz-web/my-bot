@@ -4801,17 +4801,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
                 return
 
-            # Агар тасдиқлаш/рад этиш босилган бўлса — фақат битта меню орқага қайтади.
-            context.user_data["mode"] = "technadzor_registration_list"
+            # Агар тасдиқлаш/рад этиш босилган бўлса:
+            # текширувда яна ходим бўлса — ходим танлаш менюсига қайтади
+            # ходим қолмаган бўлса — Ходимлар менюсига қайтади.
+
+            pending_count = pending_registration_count()
+
+            if pending_count > 0:
+                context.user_data["mode"] = "technadzor_registration_list"
+
+                await update.message.reply_text(
+                    "📝 Регистрация текшируви",
+                    reply_markup=technadzor_staff_back_reply_keyboard()
+                )
+
+                msg = await update.message.reply_text(
+                    "Текширувда турган ходимлар:",
+                    reply_markup=technadzor_pending_registration_keyboard()
+                )
+
+                context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                return
+
+            context.user_data["mode"] = "technadzor_staff_menu"
+
             await update.message.reply_text(
-                "📝 Регистрация текшируви",
-                reply_markup=technadzor_staff_back_reply_keyboard()
+                "👥 Ходимлар менюси",
+                reply_markup=technadzor_staff_menu_keyboard()
             )
-            msg = await update.message.reply_text(
-                "Текширувда турган ходимлар:",
-                reply_markup=technadzor_pending_registration_keyboard()
-            )
-            context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
             return
 
     if role == "technadzor":
