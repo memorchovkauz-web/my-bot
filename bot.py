@@ -1495,6 +1495,17 @@ def diesel_prihod_sender_returned_keyboard(record_id):
 
 def diesel_prihod_technadzor_keyboard(record_id):
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👁 Кўриш", callback_data=f"diesel_prihod_media|{record_id}")],
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_prihod_approve|{record_id}"),
+            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_prihod_tech_edit|{record_id}"),
+        ],
+        [InlineKeyboardButton("❌ Рад этиш", callback_data=f"diesel_prihod_reject|{record_id}")]
+    ])
+
+
+def diesel_prihod_technadzor_after_view_keyboard(record_id):
+    return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_prihod_approve|{record_id}"),
             InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_prihod_tech_edit|{record_id}"),
@@ -1685,12 +1696,86 @@ def diesel_prihod_pending_keyboard():
         sender = get_employee_full_name_by_telegram_id(telegram_id)
         buttons.append([
             InlineKeyboardButton(
-                f"{date_text} | {liter} л | {sender}"[:60],
+                f"👁 Кўриш | {date_text} | {liter} л | {sender}"[:60],
                 callback_data=f"diesel_prihod_view|{record_id}"
             )
         ])
 
     return InlineKeyboardMarkup(buttons)
+
+
+async def open_diesel_prihod_for_technadzor(query, context, record_id):
+    if not diesel_prihod_row_to_context(record_id, context):
+        await query.answer("Маълумот топилмади.", show_alert=True)
+        return
+
+    context.user_data["mode"] = "technadzor_diesel_prihod_card"
+    context.user_data["diesel_prihod_current_id"] = str(record_id)
+
+    card_text = diesel_prihod_card_text(
+        context,
+        status=context.user_data.get("diesel_prihod_status", "Текширувда"),
+        receiver_comment=context.user_data.get("diesel_prihod_receiver_comment")
+    )
+
+    # Эски рўйхат хабарини ўчирамиз. Ўчмаса, камида inline кнопкаларини олиб ташлаймиз.
+    try:
+        await query.message.delete()
+    except Exception:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+    card_msg = await query.message.chat.send_message(
+        card_text,
+        reply_markup=diesel_prihod_technadzor_keyboard(record_id)
+    )
+    remember_inline_message(context, card_msg)
+
+
+async def send_diesel_prihod_media_for_technadzor(query, context, record_id):
+    if not diesel_prihod_row_to_context(record_id, context):
+        await query.answer("Маълумот топилмади.", show_alert=True)
+        return
+
+    context.user_data["mode"] = "technadzor_diesel_prihod_card"
+    context.user_data["diesel_prihod_current_id"] = str(record_id)
+
+    # Кўриш босилганда эски карточка inline кнопкалари ўчади,
+    # кейин видео/расм ва қайта карточка чиқади.
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    video_id = context.user_data.get("diesel_prihod_video_id")
+    photo_id = context.user_data.get("diesel_prihod_photo_id")
+
+    if video_id:
+        try:
+            await query.message.chat.send_video_note(video_note=video_id)
+        except Exception:
+            try:
+                await query.message.chat.send_video(video=video_id)
+            except Exception as e:
+                print("DIESEL PRIHOD MEDIA VIDEO SEND ERROR:", e)
+
+    if photo_id:
+        try:
+            await query.message.chat.send_photo(photo=photo_id)
+        except Exception as e:
+            print("DIESEL PRIHOD MEDIA PHOTO SEND ERROR:", e)
+
+    card_msg = await query.message.chat.send_message(
+        diesel_prihod_card_text(
+            context,
+            status=context.user_data.get("diesel_prihod_status", "Текширувда"),
+            receiver_comment=context.user_data.get("diesel_prihod_receiver_comment")
+        ),
+        reply_markup=diesel_prihod_technadzor_after_view_keyboard(record_id)
+    )
+    remember_inline_message(context, card_msg)
 
 
 def diesel_get_type_keyboard():
@@ -3725,6 +3810,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "⬅️ Орқага" and get_role(update) == "technadzor":
         await clear_all_inline_messages(context, update.effective_chat.id)
+
+    if text == "⬅️ Орқага" and get_role(update) == "technadzor" and mode == "technadzor_diesel_prihod_card":
+        context.user_data["mode"] = "technadzor_diesel_prihod_list"
+        await update.message.reply_text("⛽ Текширувда турган дизел приходлар:", reply_markup=only_back_keyboard())
+        msg = await update.message.reply_text(
+            "⛽ Текширувда турган дизел приходлар:",
+            reply_markup=diesel_prihod_pending_keyboard()
+        )
+        remember_inline_message(context, msg)
+        return
 
     # === PRIORITY: Текширувчи регистрация таҳриридан орқага ===
     # Эски ходимлар/фирма flow'га тушиб кетмаслиги учун энг юқорида ушлаймиз.
@@ -5881,40 +5976,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "none":
         return
 
-    # === PRIORITY FIX: дизел приход рўйхатидан карточкани очиш ===
+    # === PRIORITY FIX: дизел приход медиа кўриш ===
+    if data.startswith("diesel_prihod_media|"):
+        context.user_data["inline_disabled_by_start"] = False
+        record_id = data.split("|", 1)[1]
+        await send_diesel_prihod_media_for_technadzor(query, context, record_id)
+        return
+
+    # === PRIORITY FIX: дизел приход рўйхатидан Кўриш ===
     if data.startswith("diesel_prihod_view|"):
         context.user_data["inline_disabled_by_start"] = False
         context.user_data["mode"] = "technadzor_diesel_prihod_card"
 
         record_id = data.split("|", 1)[1]
 
-        if not diesel_prihod_row_to_context(record_id, context):
-            await query.answer("Маълумот топилмади.", show_alert=True)
-            return
-
-        card_text = diesel_prihod_card_text(
-            context,
-            status=context.user_data.get("diesel_prihod_status", "Текширувда"),
-            receiver_comment=context.user_data.get("diesel_prihod_receiver_comment")
-        )
-
-        try:
-            await query.edit_message_text(
-                card_text,
-                reply_markup=diesel_prihod_technadzor_keyboard(record_id)
-            )
-        except Exception as e:
-            print("DIESEL PRIHOD VIEW EDIT ERROR:", e)
-            try:
-                await query.edit_message_reply_markup(reply_markup=None)
-            except Exception:
-                pass
-
-            await query.message.reply_text(
-                card_text,
-                reply_markup=diesel_prihod_technadzor_keyboard(record_id)
-            )
-
+        await open_diesel_prihod_for_technadzor(query, context, record_id)
         return
 
     # === Заправщик/Текширувчи: дизел приход callbacks ===
@@ -6511,37 +6587,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Технадзорга хабар
         try:
-            work_role = context.user_data.get("driver_work_role", "driver")
-            employee_text = (
-                "👤 Янги ходим рўйхатдан ўтди:\n\n"
-                f"👤 Лавозим: {work_role_title(work_role)}\n"
-                f"👤 Исм: {context.user_data.get('driver_name', '')}\n"
-                f"👤 Фамилия: {context.user_data.get('driver_surname', '')}\n"
-                f"📞 Телефон: {context.user_data.get('phone', '')}\n"
-            )
-
-            if work_role == "mechanic":
-                employee_text += f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
-
-            if work_role == "driver":
-                employee_text += (
-                    f"🏢 Фирма: {context.user_data.get('driver_firm', '')}\n"
-                    f"🚛 Техника: {context.user_data.get('driver_car', '')}\n"
-                )
-
-            employee_text += "\nТасдиқлайсизми?"
+            surname = context.user_data.get("driver_surname", "")
+            name = context.user_data.get("driver_name", "")
 
             for tech_id in get_user_ids_by_role("technadzor"):
                 try:
                     await context.bot.send_message(
                         chat_id=tech_id,
-                        text=employee_text,
-                        reply_markup=InlineKeyboardMarkup([
-                            [
-                                InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"approve_driver|{user_id}"),
-                                InlineKeyboardButton("❌ Рад этиш", callback_data=f"reject_driver|{user_id}")
-                            ]
-                        ])
+                        text=(
+                            "🔔 Уведомления\n"
+                            "👤 Янги ходим\n"
+                            f"{surname} {name}".strip()
+                        )
                     )
                 except Exception as e:
                     print(f"[registration] send technadzor error: {e}")
@@ -8912,7 +8969,7 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             try:
                 await context.bot.send_message(
                     chat_id=tech_id,
-                    text="👤 Янги ходим рўйхатдан ўтди.\n\nТекшириш учун: 👥 Ходимлар → Регистрация менюсига киринг."
+                    text=("🔔 Уведомления\n👤 Янги ходим\n" + f"{context.user_data.get('driver_surname', '')} {context.user_data.get('driver_name', '')}".strip())
                 )
             except Exception:
                 pass
