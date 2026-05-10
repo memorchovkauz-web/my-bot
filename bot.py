@@ -629,10 +629,13 @@ def action_keyboard():
 
 
 def technadzor_keyboard():
+    pending_count = pending_registration_count()
+    staff_text = f"👥 Ходимлар 🛎️ [ {pending_count} ]" if pending_count > 0 else "👥 Ходимлар"
+
     return ReplyKeyboardMarkup([
         [KeyboardButton("🔧 Ремонтга қўшиш")],
         [KeyboardButton("☑️ Ремонтдан чиқишини тасдиқлаш")],
-        [KeyboardButton("👥 Ходимлар")],
+        [KeyboardButton(staff_text)],
         [KeyboardButton("📚 История")],
     ], resize_keyboard=True)
 
@@ -656,7 +659,7 @@ def technadzor_staff_menu_keyboard():
     ]
 
     if pending_count > 0:
-        rows.append([KeyboardButton(f"📝 Регистрация ({pending_count})")])
+        rows.append([KeyboardButton(f"📝 Регистрация 🛎️ [ {pending_count} ]")])
 
     rows.append([KeyboardButton("⬅️ Орқага")])
 
@@ -4772,6 +4775,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
         return
 
+    if role == "technadzor" and text == "⬅️ Орқага" and mode == "technadzor_registration_after_decision":
+        await clear_technadzor_staff_inline(context, update.effective_chat.id)
+
+        context.user_data.pop("operation", None)
+        context.user_data.pop("firm", None)
+        context.user_data.pop("car", None)
+        context.user_data.pop("history_car", None)
+        context.user_data.pop("technadzor_selected_staff_id", None)
+        context.user_data.pop("technadzor_staff_action_stack", None)
+
+        pending_count = pending_registration_count()
+
+        if pending_count > 0:
+            context.user_data["mode"] = "technadzor_registration_list"
+            await update.message.reply_text(
+                "📝 Регистрация текшируви",
+                reply_markup=technadzor_staff_back_reply_keyboard()
+            )
+            msg = await update.message.reply_text(
+                "Текширувда турган ходимлар:",
+                reply_markup=technadzor_pending_registration_keyboard()
+            )
+            context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            return
+
+        context.user_data["mode"] = "technadzor_staff_menu"
+        await update.message.reply_text(
+            "👥 Ходимлар менюси",
+            reply_markup=technadzor_staff_menu_keyboard()
+        )
+        return
+
     if role == "technadzor" and text == "⬅️ Орқага" and mode in [
         "technadzor_staff_edit_name",
         "technadzor_staff_edit_surname",
@@ -4856,7 +4891,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        if text == "👥 Ходимлар":
+        if text.startswith("👥 Ходимлар"):
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             context.user_data["mode"] = "technadzor_staff_menu"
             await update.message.reply_text(
@@ -5135,7 +5170,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        await query.message.reply_text("✅ Ходим тасдиқланди" if new_status == "Тасдиқланди" else "❌ Ходим рад этилди")
+        # Кейин пастки ⬅️ Орқага босилганда бошқа flow'га кириб кетмаслиги учун
+        # махсус mode қўямиз ва ходимлар/ремонт state'ларини тозалаймиз.
+        context.user_data["mode"] = "technadzor_registration_after_decision"
+        context.user_data["technadzor_selected_staff_id"] = str(driver_id)
+        context.user_data.pop("operation", None)
+        context.user_data.pop("firm", None)
+        context.user_data.pop("car", None)
+        context.user_data.pop("history_car", None)
+        context.user_data.pop("technadzor_staff_action_stack", None)
+
+        await query.message.reply_text(
+            "✅ Ходим тасдиқланди" if new_status == "Тасдиқланди" else "❌ Ходим рад этилди",
+            reply_markup=technadzor_staff_back_reply_keyboard()
+        )
         return
 
     # === PRIORITY: регистрация таҳрирлаш кнопкалари ===
