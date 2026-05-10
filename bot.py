@@ -924,7 +924,7 @@ def technadzor_pending_registration_keyboard():
 
     for row in rows:
         driver_id, name, surname, firm, car, status, work_role = row
-        group_name = "Умумий" if (work_role or "driver") == "zapravshik" else (firm or "Фирма йўқ")
+        group_name = "Заправщик" if (work_role or "driver") == "zapravshik" else (firm or "Фирма йўқ")
 
         if group_name != current_group:
             current_group = group_name
@@ -943,10 +943,10 @@ def technadzor_pending_registration_keyboard():
 def technadzor_pending_registration_card_keyboard(driver_id):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"approve_driver|{driver_id}"),
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"tz_reg_approve|{driver_id}"),
             InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"tz_staff_edit|{driver_id}"),
         ],
-        [InlineKeyboardButton("❌ Рад этиш", callback_data=f"reject_driver|{driver_id}")]
+        [InlineKeyboardButton("❌ Рад этиш", callback_data=f"tz_reg_reject|{driver_id}")]
     ])
 
 
@@ -1092,6 +1092,63 @@ async def technadzor_show_pending_or_staff_card(message, context, driver_id, tex
     )
     context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
     return msg
+
+
+
+def get_staff_by_telegram_id(telegram_id):
+    try:
+        cursor.execute("""
+            SELECT id, telegram_id, name, surname, phone, firm, car, status,
+                   COALESCE(work_role, 'driver')
+            FROM drivers
+            WHERE telegram_id = %s
+            LIMIT 1
+        """, (int(telegram_id),))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "telegram_id": row[1],
+            "name": row[2] or "",
+            "surname": row[3] or "",
+            "phone": row[4] or "",
+            "firm": row[5] or "",
+            "car": row[6] or "",
+            "status": row[7] or "Рад этилди",
+            "work_role": row[8] or "driver",
+        }
+    except Exception as e:
+        print("GET STAFF BY TELEGRAM ID ERROR:", e)
+        return None
+
+
+def sync_driver_status_to_sheet(telegram_id, status):
+    try:
+        rows = drivers_ws.get_all_values()
+        for i, row in enumerate(rows, start=1):
+            if len(row) > 0 and str(row[0]) == str(telegram_id):
+                drivers_ws.update_cell(i, 7, status)
+                return
+    except Exception as e:
+        print("SYNC DRIVER STATUS TO SHEET ERROR:", e)
+
+
+async def notify_registered_employee(context, telegram_id, status, work_role):
+    try:
+        if status == "Тасдиқланди":
+            if work_role == "mechanic":
+                text = "✅ Механик сифатида маълумотларингиз тасдиқланди.\n/start босинг."
+            elif work_role == "zapravshik":
+                text = "✅ Заправщик сифатида маълумотларингиз тасдиқланди.\n/start босинг."
+            else:
+                text = "✅ Ҳайдовчи сифатида маълумотларингиз тасдиқланди.\n/start босинг."
+        else:
+            text = "❌ Маълумотларингиз рад этилди.\nАдминистратор билан боғланинг."
+
+        await context.bot.send_message(chat_id=int(telegram_id), text=text)
+    except Exception as e:
+        print("NOTIFY REGISTERED EMPLOYEE ERROR:", e)
 
 
 def technadzor_staff_card_reply_markup(driver_id):
@@ -4558,16 +4615,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             if new_role == "zapravshik":
+                # Заправщикда фирма ҳам, техника ҳам бўлмайди.
                 cursor.execute(
                     "UPDATE drivers SET work_role = %s, firm = NULL, car = NULL WHERE id = %s",
                     (new_role, int(driver_id))
                 )
             elif new_role == "mechanic":
+                # Механикда фирма бор, техника йўқ.
                 cursor.execute(
                     "UPDATE drivers SET work_role = %s, car = NULL WHERE id = %s",
                     (new_role, int(driver_id))
                 )
             else:
+                # Ҳайдовчида фирма ва техника мажбурий қайта танланади.
                 cursor.execute(
                     "UPDATE drivers SET work_role = %s, firm = NULL, car = NULL WHERE id = %s",
                     (new_role, int(driver_id))
@@ -4582,7 +4642,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("technadzor_staff_pending_role", None)
             context.user_data["mode"] = "technadzor_staff_card"
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
-            await update.message.reply_text("✅ Лавозим заправщик қилиб сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
             msg = await update.message.reply_text(
                 technadzor_staff_card_text(driver_id),
                 reply_markup=technadzor_staff_card_reply_markup(driver_id)
@@ -4700,10 +4759,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if driver_id and technadzor_rollback_pending_edit(context, driver_id):
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            context.user_data["mode"] = "technadzor_registration_list"
             await update.message.reply_text("↩️ Таҳрирлаш бекор қилинди. Эски маълумотлар тикланди.", reply_markup=technadzor_staff_back_reply_keyboard())
             msg = await update.message.reply_text(
-                technadzor_staff_card_text(driver_id),
-                reply_markup=technadzor_staff_card_reply_markup(driver_id)
+                "Текширувда турган ходимлар:",
+                reply_markup=technadzor_pending_registration_keyboard()
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
             return
@@ -4986,6 +5046,41 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "none":
+        return
+
+    # === PRIORITY: Регистрация текшируви тасдиқлаш/рад этиш ===
+    if data.startswith("tz_reg_approve|") or data.startswith("tz_reg_reject|"):
+        driver_id = data.split("|", 1)[1]
+        staff = get_staff_by_id(driver_id)
+
+        if not staff:
+            await query.answer("Ходим топилмади.", show_alert=True)
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            return
+
+        new_status = "Тасдиқланди" if data.startswith("tz_reg_approve|") else "Рад этилди"
+
+        try:
+            cursor.execute("UPDATE drivers SET status = %s WHERE id = %s", (new_status, int(driver_id)))
+            conn.commit()
+        except Exception as e:
+            print("TZ REG STATUS UPDATE ERROR:", e)
+            await query.answer("❌ Сақлашда хато.", show_alert=True)
+            return
+
+        technadzor_clear_pending_edit_backup(context, driver_id)
+        sync_driver_status_to_sheet(staff.get("telegram_id"), new_status)
+        await notify_registered_employee(context, staff.get("telegram_id"), new_status, staff.get("work_role", "driver"))
+
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await query.message.reply_text("✅ Ходим тасдиқланди" if new_status == "Тасдиқланди" else "❌ Ходим рад этилди")
         return
 
     # === PRIORITY: регистрация таҳрирлаш кнопкалари ===
@@ -5321,7 +5416,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("approve_driver|") or data.startswith("reject_driver|"):
         active_inline_allowed = True
 
-    if data.startswith("tz_reg"):
+    if data.startswith("tz_reg") or data.startswith("tz_reg_approve|") or data.startswith("tz_reg_reject|"):
         active_inline_allowed = current_mode in [
             "technadzor_registration_list",
             "technadzor_staff_card",
@@ -5516,28 +5611,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "tz_staff_action_back":
         driver_id = context.user_data.get("technadzor_selected_staff_id")
+        staff = get_staff_by_id(driver_id) if driver_id else None
 
-        if driver_id and technadzor_rollback_pending_edit(context, driver_id):
-            try:
-                await query.edit_message_reply_markup(reply_markup=None)
-            except Exception:
-                pass
-
-            await query.message.reply_text("↩️ Таҳрирлаш бекор қилинди. Эски маълумотлар тикланди.")
+        # Inline орқага фақат битта амал орқага қайтаради.
+        # Бу ерда rollback қилинмайди.
+        if staff and staff.get("status") == "Текширувда":
             await query.edit_message_text(
                 technadzor_staff_card_text(driver_id),
-                reply_markup=technadzor_staff_card_reply_markup(driver_id)
+                reply_markup=technadzor_pending_registration_card_keyboard(driver_id)
             )
             return
-
-        if driver_id:
-            staff = get_staff_by_id(driver_id)
-            if staff and staff.get("status") == "Текширувда":
-                await query.edit_message_text(
-                    technadzor_staff_card_text(driver_id),
-                    reply_markup=technadzor_pending_registration_card_keyboard(driver_id)
-                )
-                return
 
         stack = context.user_data.get("technadzor_staff_action_stack", [])
         last = stack.pop() if stack else None
