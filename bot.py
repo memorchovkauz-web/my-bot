@@ -764,7 +764,13 @@ def get_car_type_by_number(car_number):
 
 
 def staff_status_label(status):
-    return "PLAY" if status == "Тасдиқланди" else "BLOCK"
+    if status == "Тасдиқланди":
+        return "PLAY"
+    if status == "Рад этилди":
+        return "BLOCK"
+    if status == "Текширувда":
+        return "Текширувда"
+    return status or "Текширувда"
 
 
 def staff_status_db(label):
