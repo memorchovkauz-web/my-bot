@@ -131,8 +131,23 @@ CREATE TABLE IF NOT EXISTS diesel_prihod (
 )
 """)
 
-cursor.execute("ALTER TABLE diesel_prihod ADD COLUMN IF NOT EXISTS receiver_comment TEXT")
-cursor.execute("ALTER TABLE diesel_prihod ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP")
+def safe_alter_table(sql):
+    try:
+        cursor.execute("SET statement_timeout = '10s'")
+        cursor.execute("SET lock_timeout = '5s'")
+        cursor.execute(sql)
+        cursor.execute("RESET statement_timeout")
+        cursor.execute("RESET lock_timeout")
+    except Exception as e:
+        print(f"[DB MIGRATION WARNING] {sql} failed: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+safe_alter_table("ALTER TABLE diesel_prihod ADD COLUMN IF NOT EXISTS receiver_comment TEXT")
+safe_alter_table("ALTER TABLE diesel_prihod ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP")
 
 conn.commit()
 
