@@ -1012,6 +1012,88 @@ def technadzor_staff_edit_keyboard(driver_id):
 
 
 
+
+def technadzor_pending_edit_backup_key(driver_id):
+    return str(driver_id)
+
+
+def technadzor_save_pending_edit_backup(context, driver_id):
+    staff = get_staff_by_id(driver_id)
+    if not staff or staff.get("status") != "Текширувда":
+        return
+
+    backups = context.user_data.setdefault("technadzor_pending_edit_backups", {})
+    key = technadzor_pending_edit_backup_key(driver_id)
+
+    if key not in backups:
+        backups[key] = {
+            "name": staff.get("name", ""),
+            "surname": staff.get("surname", ""),
+            "phone": staff.get("phone", ""),
+            "firm": staff.get("firm", ""),
+            "car": staff.get("car", ""),
+            "status": staff.get("status", "Текширувда"),
+            "work_role": staff.get("work_role", "driver"),
+        }
+
+
+def technadzor_clear_pending_edit_backup(context, driver_id):
+    backups = context.user_data.get("technadzor_pending_edit_backups", {})
+    backups.pop(technadzor_pending_edit_backup_key(driver_id), None)
+
+
+def technadzor_rollback_pending_edit(context, driver_id):
+    backups = context.user_data.get("technadzor_pending_edit_backups", {})
+    key = technadzor_pending_edit_backup_key(driver_id)
+    backup = backups.get(key)
+
+    if not backup:
+        return False
+
+    try:
+        cursor.execute("""
+            UPDATE drivers
+            SET name = %s,
+                surname = %s,
+                phone = %s,
+                firm = %s,
+                car = %s,
+                status = %s,
+                work_role = %s
+            WHERE id = %s
+        """, (
+            backup.get("name", ""),
+            backup.get("surname", ""),
+            backup.get("phone", ""),
+            backup.get("firm", ""),
+            backup.get("car", ""),
+            backup.get("status", "Текширувда"),
+            backup.get("work_role", "driver"),
+            int(driver_id),
+        ))
+        conn.commit()
+        backups.pop(key, None)
+        return True
+    except Exception as e:
+        print("TECHNADZOR PENDING EDIT ROLLBACK ERROR:", e)
+        return False
+
+
+async def technadzor_show_pending_or_staff_card(message, context, driver_id, text_prefix=None):
+    context.user_data["mode"] = "technadzor_staff_card"
+    context.user_data["technadzor_selected_staff_id"] = str(driver_id)
+
+    if text_prefix:
+        await message.reply_text(text_prefix, reply_markup=technadzor_staff_back_reply_keyboard())
+
+    msg = await message.reply_text(
+        technadzor_staff_card_text(driver_id),
+        reply_markup=technadzor_staff_card_reply_markup(driver_id)
+    )
+    context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+    return msg
+
+
 def technadzor_staff_card_reply_markup(driver_id):
     staff = get_staff_by_id(driver_id)
     if staff and staff.get("status") == "Текширувда":
@@ -4503,7 +4585,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Лавозим заправщик қилиб сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
             msg = await update.message.reply_text(
                 technadzor_staff_card_text(driver_id),
-                reply_markup=technadzor_staff_card_keyboard(driver_id)
+                reply_markup=technadzor_staff_card_reply_markup(driver_id)
             )
             context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
             return
@@ -4604,6 +4686,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
         return
+
+    if role == "technadzor" and text == "⬅️ Орқага" and mode in [
+        "technadzor_staff_edit_name",
+        "technadzor_staff_edit_surname",
+        "technadzor_staff_edit_phone",
+        "technadzor_staff_edit_role",
+        "technadzor_staff_edit_firm",
+        "technadzor_staff_edit_car",
+        "technadzor_staff_card",
+    ]:
+        driver_id = context.user_data.get("technadzor_selected_staff_id")
+
+        if driver_id and technadzor_rollback_pending_edit(context, driver_id):
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            await update.message.reply_text("↩️ Таҳрирлаш бекор қилинди. Эски маълумотлар тикланди.", reply_markup=technadzor_staff_back_reply_keyboard())
+            msg = await update.message.reply_text(
+                technadzor_staff_card_text(driver_id),
+                reply_markup=technadzor_staff_card_reply_markup(driver_id)
+            )
+            context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            return
+
+        if driver_id:
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            msg = await update.message.reply_text(
+                technadzor_staff_card_text(driver_id),
+                reply_markup=technadzor_staff_card_reply_markup(driver_id)
+            )
+            context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            return
 
     if role == "technadzor":
         if text == "⬅️ Орқага" and mode in ["select_firm_for_add", "technadzor_staff_menu"]:
@@ -5301,6 +5413,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("tz_staff_edit|"):
         driver_id = data.split("|", 1)[1]
+        technadzor_save_pending_edit_backup(context, driver_id)
+
         context.user_data.setdefault("technadzor_staff_action_stack", []).append({
             "screen": "card",
             "driver_id": driver_id,
@@ -5320,6 +5434,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         driver_id = parts[1]
         field = parts[2]
+        technadzor_save_pending_edit_backup(context, driver_id)
+
         context.user_data.setdefault("technadzor_staff_action_stack", []).append({
             "screen": "edit_menu",
             "driver_id": driver_id,
@@ -5399,6 +5515,30 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "tz_staff_action_back":
+        driver_id = context.user_data.get("technadzor_selected_staff_id")
+
+        if driver_id and technadzor_rollback_pending_edit(context, driver_id):
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            await query.message.reply_text("↩️ Таҳрирлаш бекор қилинди. Эски маълумотлар тикланди.")
+            await query.edit_message_text(
+                technadzor_staff_card_text(driver_id),
+                reply_markup=technadzor_staff_card_reply_markup(driver_id)
+            )
+            return
+
+        if driver_id:
+            staff = get_staff_by_id(driver_id)
+            if staff and staff.get("status") == "Текширувда":
+                await query.edit_message_text(
+                    technadzor_staff_card_text(driver_id),
+                    reply_markup=technadzor_pending_registration_card_keyboard(driver_id)
+                )
+                return
+
         stack = context.user_data.get("technadzor_staff_action_stack", [])
         last = stack.pop() if stack else None
         context.user_data["technadzor_staff_action_stack"] = stack
@@ -5425,12 +5565,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             driver_id = last.get("driver_id")
             await query.edit_message_text(
                 technadzor_staff_card_text(driver_id),
-                reply_markup=technadzor_staff_card_keyboard(driver_id)
+                reply_markup=technadzor_staff_card_reply_markup(driver_id)
             )
             return
 
         if last.get("screen") == "edit_menu":
             driver_id = last.get("driver_id")
+            staff = get_staff_by_id(driver_id)
+            if staff and staff.get("status") == "Текширувда":
+                await query.edit_message_text(
+                    technadzor_staff_card_text(driver_id),
+                    reply_markup=technadzor_pending_registration_card_keyboard(driver_id)
+                )
+                return
+
             await query.edit_message_text(
                 "✏️ Қайси маълумотни таҳрирлайсиз?",
                 reply_markup=technadzor_staff_edit_keyboard(driver_id)
@@ -7360,6 +7508,7 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             telegram_id = driver_ref
 
         if db_id:
+            technadzor_clear_pending_edit_backup(context, db_id)
             cursor.execute("UPDATE drivers SET status = %s WHERE id = %s", ("Тасдиқланди", db_id))
             conn.commit()
         else:
@@ -7411,6 +7560,7 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             telegram_id = driver_ref
 
         if db_id:
+            technadzor_clear_pending_edit_backup(context, db_id)
             cursor.execute("UPDATE drivers SET status = %s WHERE id = %s", ("Рад этилди", db_id))
             conn.commit()
         else:
