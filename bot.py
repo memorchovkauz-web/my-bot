@@ -1011,6 +1011,14 @@ def technadzor_staff_edit_keyboard(driver_id):
     return InlineKeyboardMarkup(buttons)
 
 
+
+def technadzor_staff_card_reply_markup(driver_id):
+    staff = get_staff_by_id(driver_id)
+    if staff and staff.get("status") == "Текширувда":
+        return technadzor_pending_registration_card_keyboard(driver_id)
+    return technadzor_staff_card_keyboard(driver_id)
+
+
 def technadzor_staff_role_reply_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🚚 Ҳайдовчи")],
@@ -4416,7 +4424,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Маълумот сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
         msg = await update.message.reply_text(
             technadzor_staff_card_text(driver_id),
-            reply_markup=technadzor_staff_card_keyboard(driver_id)
+            reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
         return
@@ -4446,7 +4454,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Телефон сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
         msg = await update.message.reply_text(
             technadzor_staff_card_text(driver_id),
-            reply_markup=technadzor_staff_card_keyboard(driver_id)
+            reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
         return
@@ -4551,7 +4559,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Фирма сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
         msg = await update.message.reply_text(
             technadzor_staff_card_text(driver_id),
-            reply_markup=technadzor_staff_card_keyboard(driver_id)
+            reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
         return
@@ -4592,7 +4600,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Техника сақланди.", reply_markup=technadzor_staff_back_reply_keyboard())
         msg = await update.message.reply_text(
             technadzor_staff_card_text(driver_id),
-            reply_markup=technadzor_staff_card_keyboard(driver_id)
+            reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
         return
@@ -5287,7 +5295,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["technadzor_selected_staff_id"] = driver_id
         await query.edit_message_text(
             technadzor_staff_card_text(driver_id),
-            reply_markup=technadzor_staff_card_keyboard(driver_id)
+            reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         return
 
@@ -5386,7 +5394,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(
             technadzor_staff_card_text(driver_id),
-            reply_markup=technadzor_staff_card_keyboard(driver_id)
+            reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
         return
 
