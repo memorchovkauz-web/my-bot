@@ -1742,12 +1742,21 @@ async def send_diesel_prihod_media_for_technadzor(query, context, record_id):
     context.user_data["mode"] = "technadzor_diesel_prihod_card"
     context.user_data["diesel_prihod_current_id"] = str(record_id)
 
-    # Кўриш босилганда эски карточка inline кнопкалари ўчади,
-    # кейин видео/расм ва қайта карточка чиқади.
+    # “Кўриш” босилганда:
+    # 1) юқорида қолган барча эски inline кнопкалар ўчади
+    # 2) эски карточка/эски маълумот хабари ўчади
     try:
-        await query.edit_message_reply_markup(reply_markup=None)
+        await clear_all_inline_messages(context, query.message.chat_id)
     except Exception:
         pass
+
+    try:
+        await query.message.delete()
+    except Exception:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
 
     video_id = context.user_data.get("diesel_prihod_video_id")
     photo_id = context.user_data.get("diesel_prihod_photo_id")
