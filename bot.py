@@ -657,8 +657,11 @@ def action_keyboard():
 
 
 def technadzor_keyboard():
+    total_notifications = pending_registration_count() + pending_repair_exit_count() + pending_diesel_prihod_count()
+    notification_text = f"🔔 Уведомления [ {total_notifications} ]" if total_notifications > 0 else "🔔 Уведомления"
+
     return ReplyKeyboardMarkup([
-        [KeyboardButton("🔔 Уведомления")],
+        [KeyboardButton(notification_text)],
         [KeyboardButton("🔧 Ремонтга қўшиш")],
         [KeyboardButton("👥 Ходимлар")],
         [KeyboardButton("💾 История")],
@@ -670,24 +673,13 @@ def technadzor_notifications_keyboard():
     registration_count = pending_registration_count()
     diesel_count = pending_diesel_prihod_count()
 
-    rows = []
+    rows = [
+        [KeyboardButton(f"📝 Регистрация [ {registration_count} ]")],
+        [KeyboardButton(f"🛠 Ремонтдан чиқариш [ {repair_count} ]")],
+        [KeyboardButton(f"⛽ Дизел приход [ {diesel_count} ]")],
+        [KeyboardButton("⬅️ Орқага")],
+    ]
 
-    if registration_count > 0:
-        rows.append([KeyboardButton(f"📝 Регистрация 🛎️ [ {registration_count} ]")])
-    else:
-        rows.append([KeyboardButton("📝 Регистрация")])
-
-    if repair_count > 0:
-        rows.append([KeyboardButton(f"🛠 Ремонтдан чиқариш 🛎️ [ {repair_count} ]")])
-    else:
-        rows.append([KeyboardButton("🛠 Ремонтдан чиқариш")])
-
-    if diesel_count > 0:
-        rows.append([KeyboardButton(f"⛽ Дизел приход 🛎️ [ {diesel_count} ]")])
-    else:
-        rows.append([KeyboardButton("⛽ Дизел приход")])
-
-    rows.append([KeyboardButton("⬅️ Орқага")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
@@ -782,6 +774,10 @@ def extract_firm_from_count_button(value):
 
 
 def technadzor_staff_back_reply_keyboard():
+    return ReplyKeyboardMarkup([[KeyboardButton("⬅️ Орқага")]], resize_keyboard=True)
+
+
+def only_back_keyboard():
     return ReplyKeyboardMarkup([[KeyboardButton("⬅️ Орқага")]], resize_keyboard=True)
 
 
@@ -3671,6 +3667,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
 
+    # === PRIORITY: Текширувчи регистрация таҳриридан орқага ===
+    # Эски ходимлар/фирма flow'га тушиб кетмаслиги учун энг юқорида ушлаймиз.
+    if get_role(update) == "technadzor" and text == "⬅️ Орқага" and mode in [
+        "technadzor_staff_edit_name",
+        "technadzor_staff_edit_surname",
+        "technadzor_staff_edit_phone",
+        "technadzor_staff_edit_role",
+        "technadzor_staff_edit_firm",
+        "technadzor_staff_edit_car",
+        "technadzor_staff_card",
+    ]:
+        await clear_technadzor_staff_inline(context, update.effective_chat.id)
+        driver_id = context.user_data.get("technadzor_selected_staff_id")
+
+        if driver_id and technadzor_rollback_pending_edit(context, driver_id):
+            context.user_data["mode"] = "technadzor_registration_list"
+            await update.message.reply_text(
+                "↩️ Таҳрирлаш бекор қилинди. Эски маълумотлар тикланди.",
+                reply_markup=only_back_keyboard()
+            )
+            msg = await update.message.reply_text(
+                "Текширувда турган ходимлар:",
+                reply_markup=technadzor_pending_registration_keyboard()
+            )
+            context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            return
+
+        context.user_data["mode"] = "technadzor_registration_list"
+        await update.message.reply_text("📝 Регистрация текшируви", reply_markup=only_back_keyboard())
+        msg = await update.message.reply_text(
+            "Текширувда турган ходимлар:",
+            reply_markup=technadzor_pending_registration_keyboard()
+        )
+        context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+        return
+
     # === Заправщик: дизел приход text flow ===
     if get_role(update) == "zapravshik":
         if text == "⬅️ Орқага" and mode == "zapravshik_diesel_menu":
@@ -3880,7 +3912,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        if text == "🔔 Уведомления":
+        if text.startswith("🔔 Уведомления"):
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             context.user_data.clear()
             context.user_data["mode"] = "technadzor_notifications_menu"
@@ -3892,7 +3924,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await clear_technadzor_staff_inline(context, update.effective_chat.id)
                 context.user_data["mode"] = "technadzor_registration_list"
                 context.user_data["technadzor_staff_action_stack"] = []
-                await update.message.reply_text("📝 Регистрация текшируви", reply_markup=technadzor_staff_back_reply_keyboard())
+                await update.message.reply_text("📝 Регистрация текшируви", reply_markup=only_back_keyboard())
                 msg = await update.message.reply_text(
                     "Текширувда турган ходимлар:",
                     reply_markup=technadzor_pending_registration_keyboard()
@@ -3902,11 +3934,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if text.startswith("🛠 Ремонтдан чиқариш"):
                 context.user_data["mode"] = "confirm_exit"
+                await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=only_back_keyboard())
                 await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
                 return
 
             if text.startswith("⛽ Дизел приход"):
                 context.user_data["mode"] = "technadzor_diesel_prihod_list"
+                await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=only_back_keyboard())
                 await update.message.reply_text("⛽ Текширувда турган дизел приходлар:", reply_markup=diesel_prihod_pending_keyboard())
                 return
 
@@ -5038,7 +5072,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(
                     "🔴 <b>Фирмани танланг:</b>",
                     parse_mode="HTML",
-                    reply_markup=firm_keyboard()
+                    reply_markup=firm_back_keyboard()
                 )
                 return
 
