@@ -9992,8 +9992,23 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
 
+MAIN_LOOP = None
+
+
 class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        # Render log'ni ortиқча HTTP health check ёзувлари билан тўлдирмаслик учун.
+        return
+
     def do_GET(self):
+        # UptimeRobot root "/" ёки "/health" текширса 200 OK қайтаради.
+        if self.path == "/" or self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Bot is running")
+            return
+
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
@@ -10003,6 +10018,43 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
+
+    def do_POST(self):
+        # Telegram webhook фақат /TOKEN йўлига келиши керак.
+        expected_path = f"/{TOKEN}"
+
+        if self.path != expected_path:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"Not found")
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            raw_body = self.rfile.read(content_length)
+
+            update_data = json.loads(raw_body.decode("utf-8"))
+            telegram_update = Update.de_json(update_data, app.bot)
+
+            if MAIN_LOOP is None:
+                raise RuntimeError("MAIN_LOOP is not ready")
+
+            asyncio.run_coroutine_threadsafe(
+                app.process_update(telegram_update),
+                MAIN_LOOP
+            )
+
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+
+        except Exception as e:
+            print("WEBHOOK POST ERROR:", e)
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
 
 
 def run_server():
@@ -10023,13 +10075,36 @@ app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video)
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 
-print("BOT STARTED WEBHOOK")
+async def main():
+    global MAIN_LOOP
 
-app.run_webhook(
-    listen="0.0.0.0",
-    port=int(os.environ.get("PORT", 10000)),
-    url_path=TOKEN,
-    webhook_url=f"https://telegram-bot-r9k8.onrender.com/{TOKEN}",
-    drop_pending_updates=True,
-    allowed_updates=Update.ALL_TYPES,
-)
+    MAIN_LOOP = asyncio.get_running_loop()
+
+    render_url = os.getenv(
+        "WEBHOOK_BASE_URL",
+        "https://telegram-bot-r9k8.onrender.com"
+    ).rstrip("/")
+
+    webhook_url = f"{render_url}/{TOKEN}"
+
+    await app.initialize()
+
+    await app.bot.set_webhook(
+        url=webhook_url,
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
+
+    await app.start()
+
+    threading.Thread(target=run_server, daemon=True).start()
+
+    print("BOT STARTED HYBRID WEBHOOK + HEALTH SERVER")
+    print(f"HEALTH URL: {render_url}/")
+    print(f"WEBHOOK URL: {webhook_url}")
+
+    await asyncio.Event().wait()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
