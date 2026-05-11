@@ -1521,6 +1521,7 @@ def diesel_prihod_edit_keyboard(prefix="diesel_prihod_edit"):
         return f"{prefix}_{field}"
 
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏢 Фирма", callback_data=cb("firm"))],
         [InlineKeyboardButton("⛽ Литр", callback_data=cb("liter"))],
         [InlineKeyboardButton("📝 Изоҳ", callback_data=cb("note"))],
         [InlineKeyboardButton("🎥 Видео", callback_data=cb("video"))],
@@ -1562,6 +1563,41 @@ def get_employee_full_name_by_telegram_id(telegram_id):
     return user.get("name") if user else "Номаълум"
 
 
+
+DIESEL_PRIHOD_FIRM_PREFIX = "Фирма: "
+
+
+def encode_diesel_prihod_note(firm, note):
+    firm = (firm or "").strip()
+    note = (note or "").strip()
+    return f"{DIESEL_PRIHOD_FIRM_PREFIX}{firm}\n{note}"
+
+
+def parse_diesel_prihod_note(raw_note):
+    raw_note = raw_note or ""
+    receiver_comment = ""
+
+    if "\nРад изоҳи: " in raw_note:
+        raw_note, receiver_comment = raw_note.split("\nРад изоҳи: ", 1)
+
+    firm = ""
+    note = raw_note
+
+    if raw_note.startswith(DIESEL_PRIHOD_FIRM_PREFIX):
+        lines = raw_note.split("\n", 1)
+        firm = lines[0].replace(DIESEL_PRIHOD_FIRM_PREFIX, "", 1).strip()
+        note = lines[1].strip() if len(lines) > 1 else ""
+
+    return firm, note, receiver_comment
+
+
+def get_diesel_prihod_note_for_db(context):
+    return encode_diesel_prihod_note(
+        context.user_data.get("diesel_prihod_firm", ""),
+        context.user_data.get("diesel_prihod_note", "")
+    )
+
+
 def diesel_prihod_card_text(context, status="Текширувда", receiver_comment=None):
     created_at = context.user_data.get("diesel_prihod_time") or now_text()
     accepted_by = get_employee_full_name_by_telegram_id(context.user_data.get("diesel_prihod_telegram_id") or context.user_data.get("telegram_id") or 0)
@@ -1569,6 +1605,7 @@ def diesel_prihod_card_text(context, status="Текширувда", receiver_com
     text = (
         "✅ ДИЗЕЛ ПРИХОД\n\n"
         f"🕒 Сана: {created_at}\n"
+        f"🏢 Фирма: {context.user_data.get('diesel_prihod_firm', '-') or '-'}\n"
         f"⛽ Литр: {context.user_data.get('diesel_prihod_liter', '')}\n"
         f"📝 Изоҳ: {context.user_data.get('diesel_prihod_note', '')}\n"
         f"🎥 Видео: сақланди ✅\n"
@@ -1596,15 +1633,11 @@ def diesel_prihod_row_to_context(record_id, context):
     if not row:
         return None
 
-    note_text = row[3] or ""
-    receiver_comment = ""
-    if "\nРад изоҳи: " in note_text:
-        parts = note_text.split("\nРад изоҳи: ", 1)
-        note_text = parts[0]
-        receiver_comment = parts[1]
+    firm_text, note_text, receiver_comment = parse_diesel_prihod_note(row[3] or "")
 
     context.user_data["diesel_prihod_id"] = row[0]
     context.user_data["diesel_prihod_telegram_id"] = row[1]
+    context.user_data["diesel_prihod_firm"] = firm_text or "Фирма танланмаган"
     context.user_data["diesel_prihod_liter"] = str(row[2])
     context.user_data["diesel_prihod_note"] = note_text
     context.user_data["diesel_prihod_video_id"] = row[4]
@@ -1693,10 +1726,11 @@ def diesel_prihod_pending_keyboard():
     buttons = []
     for record_id, telegram_id, liter, note, status, created_at in rows:
         date_text = created_at.strftime("%d.%m %H:%M") if created_at else ""
-        sender = get_employee_full_name_by_telegram_id(telegram_id)
+        firm_text, _, _ = parse_diesel_prihod_note(note or "")
+        firm_text = firm_text or "Фирма танланмаган"
         buttons.append([
             InlineKeyboardButton(
-                f"👁 Кўриш | {date_text} | {liter} л | {sender}"[:60],
+                f"{date_text} | {liter} л | {firm_text}"[:60],
                 callback_data=f"diesel_prihod_view|{record_id}"
             )
         ])
@@ -3876,11 +3910,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if text == "⬅️ Орқага" and mode in [
+            "diesel_prihod_firm",
             "diesel_prihod_liter",
             "diesel_prihod_note",
             "diesel_prihod_video",
             "diesel_prihod_photo",
             "diesel_prihod_confirm",
+            "diesel_prihod_edit_firm",
             "diesel_prihod_edit_liter",
             "diesel_prihod_edit_note",
             "diesel_prihod_edit_video",
@@ -3898,16 +3934,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if text == "➕ Дизел приход":
             context.user_data.clear()
-            context.user_data["mode"] = "diesel_prihod_liter"
+            context.user_data["mode"] = "diesel_prihod_firm"
             await update.message.reply_text(
-                "⛽ Неччи литр приход қиляпсиз?\n\nФақат сон киритинг.\nМисол: 1500",
-                reply_markup=back_keyboard()
+                "🏢 Қайси фирмага дизел приход қиляпсиз?",
+                reply_markup=firm_back_keyboard()
             )
             return
 
         if text == "➖ Дизел расход":
             await update.message.reply_text("➖ Дизел расход менюси кейинги босқичда қўшилади.", reply_markup=zapravshik_diesel_menu_keyboard())
             return
+
+    if mode in ["diesel_prihod_firm", "diesel_prihod_edit_firm"]:
+        if text not in FIRM_NAMES:
+            await update.message.reply_text(
+                "❌ Фирмани пастки менюдан танланг.",
+                reply_markup=firm_back_keyboard()
+            )
+            return
+
+        context.user_data["diesel_prihod_firm"] = text
+
+        if mode == "diesel_prihod_edit_firm":
+            context.user_data["mode"] = "diesel_prihod_confirm"
+            await update.message.reply_text(
+                diesel_prihod_card_text(context, status="------"),
+                reply_markup=diesel_prihod_confirm_keyboard()
+            )
+            return
+
+        context.user_data["mode"] = "diesel_prihod_liter"
+        await update.message.reply_text(
+            "⛽ Неччи литр приход қиляпсиз?\n\nФақат сон киритинг.\nМисол: 1500",
+            reply_markup=back_keyboard()
+        )
+        return
 
     if mode in ["diesel_prihod_liter", "diesel_prihod_edit_liter"]:
         if not is_valid_liter_amount(text):
@@ -3979,6 +4040,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         return
 
+    if mode == "diesel_prihod_db_edit_firm":
+        record_id = context.user_data.get("diesel_prihod_editing_db_id")
+        if text not in FIRM_NAMES:
+            await update.message.reply_text("❌ Фирмани пастки менюдан танланг.", reply_markup=firm_back_keyboard())
+            return
+
+        if not diesel_prihod_row_to_context(record_id, context):
+            await update.message.reply_text("❌ Маълумот топилмади.", reply_markup=zapravshik_diesel_menu_keyboard())
+            return
+
+        context.user_data["diesel_prihod_firm"] = text
+
+        cursor.execute(
+            "UPDATE diesel_prihod SET note = %s WHERE id = %s",
+            (get_diesel_prihod_note_for_db(context), int(record_id))
+        )
+        conn.commit()
+
+        context.user_data["mode"] = "diesel_prihod_db_card"
+        await show_diesel_prihod_db_card_after_edit(update.message, context, record_id)
+        return
+
     if mode == "diesel_prihod_db_edit_liter":
         record_id = context.user_data.get("diesel_prihod_editing_db_id")
         if not is_valid_liter_amount(text):
@@ -3995,7 +4078,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_valid_text_number_note(text):
             await update.message.reply_text("❌ Нотўғри маълумот. Фақат текст ва рақам киритинг.", reply_markup=back_keyboard())
             return
-        cursor.execute("UPDATE diesel_prihod SET note = %s WHERE id = %s", (text.strip(), int(record_id)))
+        if diesel_prihod_row_to_context(record_id, context):
+            context.user_data["diesel_prihod_note"] = text.strip()
+
+        cursor.execute(
+            "UPDATE diesel_prihod SET note = %s WHERE id = %s",
+            (get_diesel_prihod_note_for_db(context), int(record_id))
+        )
         conn.commit()
         context.user_data["mode"] = "diesel_prihod_db_card"
         await show_diesel_prihod_db_card_after_edit(update.message, context, record_id)
@@ -6019,6 +6108,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
+            if field == "firm":
+                context.user_data["mode"] = "diesel_prihod_db_edit_firm"
+                await query.message.reply_text("🏢 Янги фирмани танланг:", reply_markup=firm_back_keyboard())
+                return
+            if field == "firm":
+                context.user_data["mode"] = "diesel_prihod_db_edit_firm"
+                await query.message.reply_text("🏢 Янги фирмани танланг:", reply_markup=firm_back_keyboard())
+                return
             if field == "liter":
                 context.user_data["mode"] = "diesel_prihod_db_edit_liter"
                 await query.message.reply_text("⛽ Янги литрни киритинг. Фақат сон.", reply_markup=back_keyboard())
@@ -6042,12 +6139,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+        firm = context.user_data.get("diesel_prihod_firm")
         liter = context.user_data.get("diesel_prihod_liter")
         note = context.user_data.get("diesel_prihod_note")
         video_id = context.user_data.get("diesel_prihod_video_id")
         photo_id = context.user_data.get("diesel_prihod_photo_id")
 
-        if not all([liter, note, video_id, photo_id]):
+        if not all([firm, liter, note, video_id, photo_id]):
             await query.message.reply_text("❌ Маълумот тўлиқ эмас. Қайта киритинг.", reply_markup=zapravshik_diesel_menu_keyboard())
             context.user_data["mode"] = "zapravshik_diesel_menu"
             return
@@ -6060,7 +6158,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """, (
                 update.effective_user.id,
                 liter,
-                note,
+                get_diesel_prihod_note_for_db(context),
                 video_id,
                 photo_id,
                 "Текширувда",
@@ -6097,6 +6195,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_reply_markup(reply_markup=None)
         context.user_data["mode"] = "diesel_prihod_edit_menu"
         await query.message.reply_text("✏️ Қайси маълумотни таҳрирлайсиз?", reply_markup=diesel_prihod_edit_keyboard("diesel_prihod_edit"))
+        return
+
+    if data == "diesel_prihod_edit_firm":
+        await query.edit_message_reply_markup(reply_markup=None)
+        context.user_data["mode"] = "diesel_prihod_edit_firm"
+        await query.message.reply_text("🏢 Янги фирмани танланг:", reply_markup=firm_back_keyboard())
         return
 
     if data == "diesel_prihod_edit_liter":
