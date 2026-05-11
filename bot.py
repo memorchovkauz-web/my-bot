@@ -8,6 +8,7 @@ import psycopg2
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from aiohttp import web
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -9992,76 +9993,6 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
 
-MAIN_LOOP = None
-
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        # Render log'ni ortиқча HTTP health check ёзувлари билан тўлдирмаслик учун.
-        return
-
-    def do_GET(self):
-        # UptimeRobot root "/" ёки "/health" текширса 200 OK қайтаради.
-        if self.path == "/" or self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"Bot is running")
-            return
-
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-
-    def do_POST(self):
-        # Telegram webhook фақат /TOKEN йўлига келиши керак.
-        expected_path = f"/{TOKEN}"
-
-        if self.path != expected_path:
-            self.send_response(404)
-            self.end_headers()
-            self.wfile.write(b"Not found")
-            return
-
-        try:
-            content_length = int(self.headers.get("Content-Length", 0))
-            raw_body = self.rfile.read(content_length)
-
-            update_data = json.loads(raw_body.decode("utf-8"))
-            telegram_update = Update.de_json(update_data, app.bot)
-
-            if MAIN_LOOP is None:
-                raise RuntimeError("MAIN_LOOP is not ready")
-
-            asyncio.run_coroutine_threadsafe(
-                app.process_update(telegram_update),
-                MAIN_LOOP
-            )
-
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"OK")
-
-        except Exception as e:
-            print("WEBHOOK POST ERROR:", e)
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"OK")
-
-
-def run_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), Handler)
-    server.serve_forever()
-
 
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -10075,16 +10006,28 @@ app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video)
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 
+async def health_handler(request):
+    return web.Response(text="Bot is running", status=200)
+
+
+async def webhook_handler(request):
+    try:
+        data = await request.json()
+        telegram_update = Update.de_json(data, app.bot)
+        await app.process_update(telegram_update)
+        return web.Response(text="OK", status=200)
+    except Exception as e:
+        print("WEBHOOK HANDLER ERROR:", e)
+        return web.Response(text="OK", status=200)
+
+
 async def main():
-    global MAIN_LOOP
-
-    MAIN_LOOP = asyncio.get_running_loop()
-
     render_url = os.getenv(
         "WEBHOOK_BASE_URL",
         "https://telegram-bot-r9k8.onrender.com"
     ).rstrip("/")
 
+    port = int(os.environ.get("PORT", 10000))
     webhook_url = f"{render_url}/{TOKEN}"
 
     await app.initialize()
@@ -10097,9 +10040,18 @@ async def main():
 
     await app.start()
 
-    threading.Thread(target=run_server, daemon=True).start()
+    web_app = web.Application()
+    web_app.router.add_get("/", health_handler)
+    web_app.router.add_get("/health", health_handler)
+    web_app.router.add_post(f"/{TOKEN}", webhook_handler)
 
-    print("BOT STARTED HYBRID WEBHOOK + HEALTH SERVER")
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    await site.start()
+
+    print("BOT STARTED WEBHOOK + AIOHTTP HEALTH SERVER")
     print(f"HEALTH URL: {render_url}/")
     print(f"WEBHOOK URL: {webhook_url}")
 
