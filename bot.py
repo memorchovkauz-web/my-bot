@@ -132,6 +132,19 @@ CREATE TABLE IF NOT EXISTS diesel_prihod (
 """)
 
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS diesel_other_expense (
+    id SERIAL PRIMARY KEY,
+    telegram_id BIGINT,
+    liter TEXT,
+    note TEXT,
+    video_id TEXT,
+    status TEXT DEFAULT 'Тасдиқланди',
+    created_at TIMESTAMP DEFAULT NOW()
+)
+""")
+
+
 conn.commit()
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -1523,6 +1536,7 @@ def diesel_prihod_firm_stock_keyboard():
         _, _, ostatka = get_diesel_stock_by_firm(firm)
         rows.append([KeyboardButton(f"{firm} [ост:{format_liter(ostatka)} л]")])
 
+    rows.append([KeyboardButton("📦 Бошқа дизел расходлар")])
     rows.append([KeyboardButton("⬅️ Орқага")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
@@ -1530,6 +1544,26 @@ def diesel_prihod_firm_stock_keyboard():
 def extract_firm_from_stock_button(value):
     value = value or ""
     return value.split(" [ост:", 1)[0].strip()
+
+
+def get_other_diesel_expense_total():
+    try:
+        cursor.execute("""
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN liter ~ '^[0-9]+([.][0-9]+)?$'
+                    THEN liter::numeric
+                    ELSE 0
+                END
+            ), 0)
+            FROM diesel_other_expense
+            WHERE TRIM(COALESCE(status, '')) = 'Тасдиқланди'
+        """)
+        row = cursor.fetchone()
+        return float(row[0] or 0)
+    except Exception as e:
+        print("OTHER DIESEL TOTAL ERROR:", e)
+        return 0.0
 
 
 def zapravka_info_text():
@@ -1544,6 +1578,10 @@ def zapravka_info_text():
             f"Остатка: {format_liter(ostatka)}л"
         )
         lines.append("")
+
+    other_total = get_other_diesel_expense_total()
+    lines.append("📦 Бошқа дизел расходлар")
+    lines.append(f"Остатка: -{format_liter(other_total)}л")
 
     return "\n".join(lines).strip()
 
@@ -4007,6 +4045,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if text == "⬅️ Орқага" and mode in [
+            "other_diesel_liter",
+            "other_diesel_note",
+            "other_diesel_video",
+            "other_diesel_confirm",
             "diesel_prihod_firm",
             "diesel_prihod_liter",
             "diesel_prihod_note",
@@ -4029,6 +4071,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🟡 Дизел бўлими", reply_markup=zapravshik_diesel_menu_keyboard())
             return
 
+        if text == "📦 Бошқа дизел расходлар":
+            context.user_data.clear()
+            context.user_data["mode"] = "other_diesel_liter"
+            await update.message.reply_text(
+                "⛽ Неччи литр расход қиляпсиз?\n\nФақат сон киритинг.",
+                reply_markup=back_keyboard()
+            )
+            return
+
         if text == "➕ Дизел приход":
             context.user_data.clear()
             context.user_data["mode"] = "diesel_prihod_firm"
@@ -4039,8 +4090,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if text == "➖ Дизел расход":
-            await update.message.reply_text("➖ Дизел расход менюси кейинги босқичда қўшилади.", reply_markup=zapravshik_diesel_menu_keyboard())
+            context.user_data.clear()
+            context.user_data["mode"] = "dieselgive_firm"
+            context.user_data["dieselgive_from_car"] = "Заправщик"
+            await update.message.reply_text(
+                "🏢 Қайси фирмага дизел расход қиляпсиз?",
+                reply_markup=diesel_prihod_firm_stock_keyboard()
+            )
             return
+
+    if mode == "other_diesel_liter":
+        clean = text.replace(",", ".").strip()
+        if not re.fullmatch(r"\d+(\.\d+)?", clean):
+            await update.message.reply_text(
+                "❌ Фақат сон киритинг.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["other_diesel_liter"] = clean
+        context.user_data["mode"] = "other_diesel_note"
+        await update.message.reply_text(
+            "📝 Изоҳ киритинг:",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if mode == "other_diesel_note":
+        if not re.search(r"[A-Za-zА-Яа-я0-9ЎўҚқҒғҲҳ]", text):
+            await update.message.reply_text(
+                "❌ Тўғри изоҳ киритинг.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["other_diesel_note"] = text.strip()
+        context.user_data["mode"] = "other_diesel_video"
+        await update.message.reply_text(
+            "🎥 Видео юборинг.",
+            reply_markup=back_keyboard()
+        )
+        return
 
     if mode in ["diesel_prihod_firm", "diesel_prihod_edit_firm"]:
         firm_name = extract_firm_from_stock_button(text)
@@ -4187,6 +4277,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         context.user_data["mode"] = "diesel_prihod_db_card"
         await show_diesel_prihod_db_card_after_edit(update.message, context, record_id)
+        return
+
+    if mode == "other_diesel_video":
+        file_id = None
+
+        if update.message.video_note:
+            if (update.message.video_note.duration or 0) < 10:
+                await update.message.reply_text(
+                    "❌ Видео 10 секунддан кам бўлмасин.",
+                    reply_markup=back_keyboard()
+                )
+                return
+            file_id = update.message.video_note.file_id
+
+        elif update.message.video:
+            if (update.message.video.duration or 0) < 10:
+                await update.message.reply_text(
+                    "❌ Видео 10 секунддан кам бўлмасин.",
+                    reply_markup=back_keyboard()
+                )
+                return
+            file_id = update.message.video.file_id
+
+        else:
+            await update.message.reply_text(
+                "❌ Фақат видео юборинг.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        context.user_data["other_diesel_video_id"] = file_id
+        context.user_data["mode"] = "other_diesel_confirm"
+
+        text_card = (
+            "➖ БОШҚА ДИЗЕЛ РАСХОД\n\n"
+            f"🕒 Сана: {now_text()}\n"
+            f"⛽ Литр: {context.user_data.get('other_diesel_liter')}\n"
+            f"📝 Изоҳ: {context.user_data.get('other_diesel_note')}\n"
+            "🎥 Видео: сақланди ✅\n"
+            f"👤 Заправшик: {get_employee_full_name_by_telegram_id(update.effective_user.id)}\n"
+            "📌 Статус: ------"
+        )
+
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Тасдиқлаш", callback_data="other_diesel_confirm"),
+                InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="other_diesel_edit"),
+            ],
+            [InlineKeyboardButton("❌ Отмен", callback_data="other_diesel_cancel")]
+        ])
+
+        await update.message.reply_text(text_card, reply_markup=kb)
         return
 
     if mode in ["diesel_prihod_video", "diesel_prihod_edit_video"]:
@@ -4763,7 +4905,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
-            reply_markup=diesel_firm_keyboard()
+            reply_markup=diesel_prihod_firm_stock_keyboard()
         )
         return
 
@@ -4799,12 +4941,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
-            reply_markup=diesel_firm_keyboard()
+            reply_markup=diesel_prihod_firm_stock_keyboard()
         )
         return
 
     if mode in ["dieselgive_firm", "dieselgive_edit_firm"]:
-        context.user_data["dieselgive_firm"] = text
+        firm_name = extract_firm_from_stock_button(text)
+
+        if firm_name not in FIRM_NAMES:
+            await update.message.reply_text(
+                "❌ Фирмани пастки менюдан танланг.",
+                reply_markup=diesel_prihod_firm_stock_keyboard()
+            )
+            return
+
+        context.user_data["dieselgive_firm"] = firm_name
 
         if mode == "dieselgive_edit_firm":
             context.user_data["mode"] = "dieselgive_edit_car"
@@ -4819,7 +4970,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🚛 Қайси дизел техникага ДИЗЕЛ беряпсиз?",
             reply_markup=diesel_cars_by_firm_keyboard(
-                text,
+                firm_name,
                 context.user_data.get("dieselgive_from_car")
             )
         )
@@ -6231,6 +6382,69 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["mode"] = "diesel_prihod_db_edit_photo"
                 await query.message.reply_text("🖼 Янги накладной расмини юборинг.", reply_markup=back_keyboard())
                 return
+
+    if data == "other_diesel_cancel":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data.clear()
+        await query.message.reply_text(
+            zapravka_info_text(),
+            reply_markup=zapravshik_main_keyboard()
+        )
+        return
+
+    if data == "other_diesel_edit":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "other_diesel_liter"
+        await query.message.reply_text(
+            "⛽ Янги литрни киритинг.",
+            reply_markup=back_keyboard()
+        )
+        return
+
+    if data == "other_diesel_confirm":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("""
+                INSERT INTO diesel_other_expense
+                (telegram_id, liter, note, video_id, status)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                query.from_user.id,
+                context.user_data.get("other_diesel_liter"),
+                context.user_data.get("other_diesel_note"),
+                context.user_data.get("other_diesel_video_id"),
+                "Тасдиқланди"
+            ))
+            conn.commit()
+        except Exception as e:
+            print("OTHER DIESEL INSERT ERROR:", e)
+            await query.message.reply_text("❌ Базага сақлашда хато.")
+            return
+
+        context.user_data.clear()
+        context.user_data["mode"] = "zapravshik_diesel_menu"
+
+        await query.message.reply_text(
+            "✅ Бошқа дизел расход сақланди.",
+            reply_markup=zapravshik_main_keyboard()
+        )
+        await query.message.reply_text(
+            zapravka_info_text(),
+            reply_markup=zapravshik_main_keyboard()
+        )
+        return
 
     if data == "diesel_prihod_confirm":
         try:
@@ -7796,7 +8010,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
-            reply_markup=diesel_firm_keyboard()
+            reply_markup=diesel_prihod_firm_stock_keyboard()
         )
         return
 
@@ -8939,7 +9153,7 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
 
         await query.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
-            reply_markup=diesel_firm_keyboard()
+            reply_markup=diesel_prihod_firm_stock_keyboard()
         )
         return
 
