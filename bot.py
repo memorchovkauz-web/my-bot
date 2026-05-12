@@ -1621,15 +1621,19 @@ def other_diesel_card_text(context, status="------"):
     )
 
 
-def other_diesel_confirm_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👁 Кўриш", callback_data="other_diesel_view")],
-        [
-            InlineKeyboardButton("✅ Тасдиқлаш", callback_data="other_diesel_confirm"),
-            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="other_diesel_edit"),
-        ],
-        [InlineKeyboardButton("❌ Отмен", callback_data="other_diesel_cancel")]
+def other_diesel_confirm_keyboard(has_media=True):
+    rows = []
+
+    if has_media:
+        rows.append([InlineKeyboardButton("👁 Кўриш", callback_data="other_diesel_view")])
+
+    rows.append([
+        InlineKeyboardButton("✅ Тасдиқлаш", callback_data="other_diesel_confirm"),
+        InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="other_diesel_edit"),
     ])
+    rows.append([InlineKeyboardButton("❌ Отмен", callback_data="other_diesel_cancel")])
+
+    return InlineKeyboardMarkup(rows)
 
 
 def other_diesel_after_view_keyboard():
@@ -1662,15 +1666,26 @@ def diesel_prihod_sender_returned_keyboard(record_id):
     ])
 
 
-def diesel_prihod_technadzor_keyboard(record_id):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👁 Кўриш", callback_data=f"diesel_prihod_media|{record_id}")],
-        [
-            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_prihod_approve|{record_id}"),
-            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_prihod_tech_edit|{record_id}"),
-        ],
-        [InlineKeyboardButton("❌ Рад этиш", callback_data=f"diesel_prihod_reject|{record_id}")]
+def diesel_prihod_technadzor_keyboard(record_id, has_media=True):
+    rows = []
+
+    if has_media:
+        rows.append([InlineKeyboardButton("👁 Кўриш", callback_data=f"diesel_prihod_media|{record_id}")])
+
+    rows.append([
+        InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_prihod_approve|{record_id}"),
+        InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_prihod_tech_edit|{record_id}"),
     ])
+    rows.append([InlineKeyboardButton("❌ Рад этиш", callback_data=f"diesel_prihod_reject|{record_id}")])
+
+    return InlineKeyboardMarkup(rows)
+
+
+def diesel_prihod_has_media(context):
+    return bool(
+        context.user_data.get("diesel_prihod_video_id")
+        or context.user_data.get("diesel_prihod_photo_id")
+    )
 
 
 def diesel_prihod_technadzor_after_view_keyboard(record_id):
@@ -1769,7 +1784,11 @@ def get_diesel_prihod_note_for_db(context):
 
 def diesel_prihod_card_text(context, status="Текширувда", receiver_comment=None):
     created_at = context.user_data.get("diesel_prihod_time") or now_text()
-    accepted_by = get_employee_full_name_by_telegram_id(context.user_data.get("diesel_prihod_telegram_id") or context.user_data.get("telegram_id") or 0)
+    accepted_by = get_employee_full_name_by_telegram_id(
+        context.user_data.get("diesel_prihod_telegram_id")
+        or context.user_data.get("telegram_id")
+        or 0
+    )
 
     text = (
         "✅ ДИЗЕЛ ПРИХОД\n\n"
@@ -1777,8 +1796,15 @@ def diesel_prihod_card_text(context, status="Текширувда", receiver_com
         f"🏢 Фирма: {context.user_data.get('diesel_prihod_firm', '-') or '-'}\n"
         f"⛽ Литр: {context.user_data.get('diesel_prihod_liter', '')}\n"
         f"📝 Изоҳ: {context.user_data.get('diesel_prihod_note', '')}\n"
-        f"🎥 Видео: сақланди ✅\n"
-        f"🖼 Расм: сақланди ✅\n"
+    )
+
+    if context.user_data.get("diesel_prihod_video_id"):
+        text += "🎥 Видео: сақланди ✅\n"
+
+    if context.user_data.get("diesel_prihod_photo_id"):
+        text += "🖼 Расм: сақланди ✅\n"
+
+    text += (
         f"👤 Қабул қилди: {accepted_by}\n"
         f"📌 Статус: {status}\n"
     )
@@ -1932,7 +1958,7 @@ async def open_diesel_prihod_for_technadzor(query, context, record_id):
 
     card_msg = await query.message.chat.send_message(
         card_text,
-        reply_markup=diesel_prihod_technadzor_keyboard(record_id)
+        reply_markup=diesel_prihod_technadzor_keyboard(record_id, has_media=diesel_prihod_has_media(context))
     )
     remember_inline_message(context, card_msg)
 
@@ -1945,9 +1971,6 @@ async def send_diesel_prihod_media_for_technadzor(query, context, record_id):
     context.user_data["mode"] = "technadzor_diesel_prihod_card"
     context.user_data["diesel_prihod_current_id"] = str(record_id)
 
-    # “Кўриш” босилганда:
-    # 1) юқорида қолган барча эски inline кнопкалар ўчади
-    # 2) эски карточка/эски маълумот хабари ўчади
     try:
         await clear_all_inline_messages(context, query.message.chat_id)
     except Exception:
@@ -1961,9 +1984,25 @@ async def send_diesel_prihod_media_for_technadzor(query, context, record_id):
         except Exception:
             pass
 
-    video_id = context.user_data.get("diesel_prihod_video_id")
-    photo_id = context.user_data.get("diesel_prihod_photo_id")
+    # 1) Янги карточка
+    await query.message.chat.send_message(
+        diesel_prihod_card_text(
+            context,
+            status=context.user_data.get("diesel_prihod_status", "Текширувда"),
+            receiver_comment=context.user_data.get("diesel_prihod_receiver_comment")
+        )
+    )
 
+    # 2) Расм бўлса расм
+    photo_id = context.user_data.get("diesel_prihod_photo_id")
+    if photo_id:
+        try:
+            await query.message.chat.send_photo(photo=photo_id)
+        except Exception as e:
+            print("DIESEL PRIHOD MEDIA PHOTO SEND ERROR:", e)
+
+    # 3) Видео бўлса видео
+    video_id = context.user_data.get("diesel_prihod_video_id")
     if video_id:
         try:
             await query.message.chat.send_video_note(video_note=video_id)
@@ -1973,18 +2012,9 @@ async def send_diesel_prihod_media_for_technadzor(query, context, record_id):
             except Exception as e:
                 print("DIESEL PRIHOD MEDIA VIDEO SEND ERROR:", e)
 
-    if photo_id:
-        try:
-            await query.message.chat.send_photo(photo=photo_id)
-        except Exception as e:
-            print("DIESEL PRIHOD MEDIA PHOTO SEND ERROR:", e)
-
+    # 4) Энг пастда кнопкалар, Кўриш қайта чиқмайди
     card_msg = await query.message.chat.send_message(
-        diesel_prihod_card_text(
-            context,
-            status=context.user_data.get("diesel_prihod_status", "Текширувда"),
-            receiver_comment=context.user_data.get("diesel_prihod_receiver_comment")
-        ),
+        "Маълумот тўғрими?",
         reply_markup=diesel_prihod_technadzor_after_view_keyboard(record_id)
     )
     remember_inline_message(context, card_msg)
@@ -4398,7 +4428,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             other_diesel_card_text(context, status="------"),
-            reply_markup=other_diesel_confirm_keyboard()
+            reply_markup=other_diesel_confirm_keyboard(has_media=bool(context.user_data.get('other_diesel_video_id')))
         )
         return
 
@@ -6493,8 +6523,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
+        # Янги карточка
         await query.message.chat.send_message(other_diesel_card_text(context, status="------"))
 
+        # Видео
         video_id = context.user_data.get("other_diesel_video_id")
         if video_id:
             try:
@@ -6502,8 +6534,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 await safe_send_video(context.bot, query.message.chat_id, video_id)
 
+        # Энг пастда кнопкалар, Кўриш қайта чиқмайди
         await query.message.chat.send_message(
-            other_diesel_card_text(context, status="------"),
+            "Маълумот тўғрими?",
             reply_markup=other_diesel_after_view_keyboard()
         )
         return
@@ -8200,9 +8233,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("diesel_rejected_view|"):
         try:
-            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.delete()
         except Exception:
-            pass
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
 
         transfer_id = data.split("|", 1)[1]
 
@@ -8236,18 +8272,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
         reject_reason = receiver_comment or "Кўрсатилмаган"
 
-        if video_id:
-            await safe_send_video(context.bot, query.message.chat_id, video_id)
-
-        await query.message.reply_text(
+        await query.message.chat.send_message(
             "❌ ДИЗЕЛ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
             f"🕒 Вақт: {created_text}\n"
             f"🏢 Фирма: {firm}\n"
             f"🚛 Дизел берган: {from_car}\n"
             f"🚛 Дизел олган: {to_car}\n"
+            f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n"
-            f"⛽ Литр: {liter}\n\n"
+            f"📌 Статус: Қайтарилди\n"
             f"❗ Рад этилиш сабаби: {reject_reason}\n\n"
+            "Маълумотни нима қиласиз?"
+        )
+
+        if video_id:
+            await safe_send_video(context.bot, query.message.chat_id, video_id)
+
+        await query.message.chat.send_message(
             "Маълумотни нима қиласиз?",
             reply_markup=diesel_rejected_after_view_keyboard(transfer_id)
         )
@@ -8799,9 +8840,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("diesel_receive_view|"):
         try:
-            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.delete()
         except Exception:
-            pass
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
 
         transfer_id = data.split("|", 1)[1]
 
@@ -8833,7 +8877,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🚛 Дизел олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n"
+            f"📌 Статус: Қабул қилувчи текширувида\n\n"
+            "Маълумот тўғрими?"
         )
+
+        await query.message.chat.send_message(text)
 
         if video_id:
             try:
@@ -8844,8 +8892,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 await safe_send_video(context.bot, query.message.chat_id, video_id)
 
-        await query.message.reply_text(
-            text,
+        await query.message.chat.send_message(
+            "Маълумот тўғрими?",
             reply_markup=diesel_receiver_after_view_keyboard(transfer_id)
         )
         return
