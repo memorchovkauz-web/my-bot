@@ -1536,7 +1536,7 @@ def diesel_prihod_firm_stock_keyboard():
         _, _, ostatka = get_diesel_stock_by_firm(firm)
         rows.append([KeyboardButton(f"{firm} [ост:{format_liter(ostatka)} л]")])
 
-    rows.append([KeyboardButton("📦 Бошқа дизел расходлар")])
+    rows.append([KeyboardButton(f"📦 Бошқа дизел расходлар [ост:-{format_liter(get_other_diesel_expense_total())} л]")])
     rows.append([KeyboardButton("⬅️ Орқага")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
@@ -1606,6 +1606,40 @@ def zapravshik_diesel_menu_keyboard():
         [KeyboardButton("➖ Дизел расход")],
         [KeyboardButton("⬅️ Орқага")],
     ], resize_keyboard=True)
+
+
+
+def other_diesel_card_text(context, status="------"):
+    return (
+        "➖ БОШҚА ДИЗЕЛ РАСХОД\n\n"
+        f"🕒 Сана: {context.user_data.get('other_diesel_time') or now_text()}\n"
+        f"⛽ Литр: {context.user_data.get('other_diesel_liter', '')}\n"
+        f"📝 Изоҳ: {context.user_data.get('other_diesel_note', '')}\n"
+        "🎥 Видео: сақланди ✅\n"
+        f"👤 Заправшик: {get_employee_full_name_by_telegram_id(context.user_data.get('other_diesel_telegram_id') or 0)}\n"
+        f"📌 Статус: {status}"
+    )
+
+
+def other_diesel_confirm_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👁 Кўриш", callback_data="other_diesel_view")],
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data="other_diesel_confirm"),
+            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="other_diesel_edit"),
+        ],
+        [InlineKeyboardButton("❌ Отмен", callback_data="other_diesel_cancel")]
+    ])
+
+
+def other_diesel_after_view_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data="other_diesel_confirm"),
+            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="other_diesel_edit"),
+        ],
+        [InlineKeyboardButton("❌ Отмен", callback_data="other_diesel_cancel")]
+    ])
 
 
 def diesel_prihod_confirm_keyboard():
@@ -2070,7 +2104,7 @@ def diesel_pending_confirm_keyboard(driver_car):
     keyboard = []
     current_firm = None
 
-    for transfer_id, from_car, to_car, firm, created_at, car_type in rows:
+    for transfer_id, from_car, to_car, firm, created_at, car_type, liter in rows:
         firm = firm or "Фирма номаълум"
 
         if current_firm != firm:
@@ -2081,7 +2115,7 @@ def diesel_pending_confirm_keyboard(driver_car):
 
         keyboard.append([
             InlineKeyboardButton(
-                f"{from_car} | {car_type} | {date_text}",
+                f"{from_car} | {liter} л | {firm} | {date_text}",
                 callback_data=f"diesel_receive_detail|{transfer_id}"
             )
         ])
@@ -3750,6 +3784,55 @@ async def clear_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["bot_message_ids"] = [msg.message_id]
 
 
+
+def v57_is_protected_mode(mode):
+    protected_keywords = [
+        "edit", "confirm", "video", "photo", "note", "liter", "km",
+        "reject", "prihod", "dieselgive", "other_diesel",
+        "repair", "driver_"
+    ]
+    mode_text = str(mode or "")
+    return any(k in mode_text for k in protected_keywords)
+
+
+async def v57_check_inactivity(update, context):
+    try:
+        role = get_role(update)
+        mode = context.user_data.get("mode")
+
+        if v57_is_protected_mode(mode):
+            context.user_data["last_activity"] = datetime.now(TASHKENT_TZ)
+            return False
+
+        now = datetime.now(TASHKENT_TZ)
+        last = context.user_data.get("last_activity")
+        context.user_data["last_activity"] = now
+
+        if not last:
+            return False
+
+        limit = timedelta(minutes=15 if role == "technadzor" else 30)
+
+        if now - last <= limit:
+            return False
+
+        context.user_data.clear()
+        context.user_data["last_activity"] = now
+
+        if role == "technadzor":
+            await update.effective_message.reply_text("⌛ Сеанс тугади.", reply_markup=technadzor_keyboard())
+        elif role == "zapravshik":
+            await update.effective_message.reply_text("⌛ Сеанс тугади.", reply_markup=zapravshik_main_keyboard())
+        elif role == "mechanic":
+            await update.effective_message.reply_text("⌛ Сеанс тугади.", reply_markup=firm_keyboard())
+        elif role == "driver":
+            await update.effective_message.reply_text("⌛ Сеанс тугади.", reply_markup=main_menu())
+        return True
+    except Exception as e:
+        print("INACTIVITY CHECK ERROR:", e)
+        return False
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if get_role(update) == "technadzor":
         await clear_all_inline_messages(context, update.effective_chat.id)
@@ -4071,7 +4154,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🟡 Дизел бўлими", reply_markup=zapravshik_diesel_menu_keyboard())
             return
 
-        if text == "📦 Бошқа дизел расходлар":
+        if text.startswith("📦 Бошқа дизел расходлар"):
             context.user_data.clear()
             context.user_data["mode"] = "other_diesel_liter"
             await update.message.reply_text(
@@ -4310,25 +4393,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["other_diesel_video_id"] = file_id
         context.user_data["mode"] = "other_diesel_confirm"
 
-        text_card = (
-            "➖ БОШҚА ДИЗЕЛ РАСХОД\n\n"
-            f"🕒 Сана: {now_text()}\n"
-            f"⛽ Литр: {context.user_data.get('other_diesel_liter')}\n"
-            f"📝 Изоҳ: {context.user_data.get('other_diesel_note')}\n"
-            "🎥 Видео: сақланди ✅\n"
-            f"👤 Заправшик: {get_employee_full_name_by_telegram_id(update.effective_user.id)}\n"
-            "📌 Статус: ------"
+        context.user_data["other_diesel_telegram_id"] = update.effective_user.id
+        context.user_data["other_diesel_time"] = now_text()
+
+        await update.message.reply_text(
+            other_diesel_card_text(context, status="------"),
+            reply_markup=other_diesel_confirm_keyboard()
         )
-
-        kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ Тасдиқлаш", callback_data="other_diesel_confirm"),
-                InlineKeyboardButton("✏️ Таҳрирлаш", callback_data="other_diesel_edit"),
-            ],
-            [InlineKeyboardButton("❌ Отмен", callback_data="other_diesel_cancel")]
-        ])
-
-        await update.message.reply_text(text_card, reply_markup=kb)
         return
 
     if mode in ["diesel_prihod_video", "diesel_prihod_edit_video"]:
@@ -6317,6 +6388,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await v57_check_inactivity(update, context):
+        return
+
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -6408,6 +6482,32 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=back_keyboard()
         )
         return
+
+
+    if data == "other_diesel_view":
+        try:
+            await query.message.delete()
+        except Exception:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+        await query.message.chat.send_message(other_diesel_card_text(context, status="------"))
+
+        video_id = context.user_data.get("other_diesel_video_id")
+        if video_id:
+            try:
+                await query.message.chat.send_video_note(video_note=video_id)
+            except Exception:
+                await safe_send_video(context.bot, query.message.chat_id, video_id)
+
+        await query.message.chat.send_message(
+            other_diesel_card_text(context, status="------"),
+            reply_markup=other_diesel_after_view_keyboard()
+        )
+        return
+
 
     if data == "other_diesel_confirm":
         try:
@@ -8645,11 +8745,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         receiver = get_driver_by_car(to_car)
 
-        if not receiver:
-            await query.message.reply_text("❌ Дизел оладиган техника ҳайдовчиси топилмади.")
-            return
-
-        to_driver_id = receiver[0]
+        if receiver:
+            to_driver_id = receiver[0]
+            transfer_status = "Қабул қилувчи текширувида"
+            auto_approved = False
+        else:
+            to_driver_id = None
+            transfer_status = "Тасдиқланди"
+            auto_approved = True
 
         cursor.execute("""
             INSERT INTO diesel_transfers (
