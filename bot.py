@@ -1881,7 +1881,73 @@ async def send_diesel_prihod_returned_to_sender(context, record_id, reason):
 
 
 
+
+def diesel_prihod_mark_staged(context, record_id):
+    context.user_data["diesel_prihod_staged_edit"] = True
+    context.user_data["diesel_prihod_staged_record_id"] = str(record_id)
+
+
+def diesel_prihod_clear_staged(context):
+    for key in [
+        "diesel_prihod_staged_edit",
+        "diesel_prihod_staged_record_id",
+    ]:
+        context.user_data.pop(key, None)
+
+
+def diesel_prihod_has_staged_for(context, record_id):
+    return (
+        bool(context.user_data.get("diesel_prihod_staged_edit"))
+        and str(context.user_data.get("diesel_prihod_staged_record_id")) == str(record_id)
+    )
+
+
+async def apply_diesel_prihod_staged_edits(context, record_id):
+    if not diesel_prihod_has_staged_for(context, record_id):
+        return
+
+    cursor.execute("""
+        UPDATE diesel_prihod
+        SET liter = %s,
+            note = %s,
+            video_id = %s,
+            photo_id = %s
+        WHERE id = %s
+    """, (
+        context.user_data.get("diesel_prihod_liter"),
+        get_diesel_prihod_note_for_db(context),
+        context.user_data.get("diesel_prihod_video_id"),
+        context.user_data.get("diesel_prihod_photo_id"),
+        int(record_id)
+    ))
+    conn.commit()
+    diesel_prihod_clear_staged(context)
+
+
+async def show_diesel_prihod_staged_card(message, context, record_id):
+    source = context.user_data.get("diesel_prihod_edit_source")
+    status = context.user_data.get("diesel_prihod_status") or "Текширувда"
+
+    if source == "returned":
+        reply_markup = diesel_prihod_sender_returned_keyboard(record_id)
+    else:
+        reply_markup = diesel_prihod_technadzor_keyboard(record_id, has_media=diesel_prihod_has_media(context))
+
+    await message.reply_text(
+        diesel_prihod_card_text(
+            context,
+            status=status,
+            receiver_comment=context.user_data.get("diesel_prihod_receiver_comment")
+        ),
+        reply_markup=reply_markup
+    )
+
+
 async def show_diesel_prihod_db_card_after_edit(message, context, record_id):
+    if diesel_prihod_has_staged_for(context, record_id):
+        await show_diesel_prihod_staged_card(message, context, record_id)
+        return
+
     row = diesel_prihod_row_to_context(record_id, context)
     if not row:
         await message.reply_text("❌ Маълумот топилмади.", reply_markup=zapravshik_diesel_menu_keyboard())
@@ -1893,7 +1959,7 @@ async def show_diesel_prihod_db_card_after_edit(message, context, record_id):
     if source == "returned":
         reply_markup = diesel_prihod_sender_returned_keyboard(record_id)
     else:
-        reply_markup = diesel_prihod_technadzor_keyboard(record_id)
+        reply_markup = diesel_prihod_technadzor_keyboard(record_id, has_media=diesel_prihod_has_media(context))
 
     await message.reply_text(
         diesel_prihod_card_text(context, status=status, receiver_comment=context.user_data.get("diesel_prihod_receiver_comment")),
@@ -4102,9 +4168,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "⬅️ Орқага" and get_role(update) == "technadzor":
         await clear_all_inline_messages(context, update.effective_chat.id)
 
-    if text == "⬅️ Орқага" and get_role(update) == "technadzor" and mode == "technadzor_diesel_prihod_card":
+    if text == "⬅️ Орқага" and mode in [
+        "diesel_prihod_db_edit_menu",
+        "diesel_prihod_db_edit_firm",
+        "diesel_prihod_db_edit_liter",
+        "diesel_prihod_db_edit_note",
+        "diesel_prihod_db_edit_video",
+        "diesel_prihod_db_edit_photo",
+    ]:
+        await clear_all_inline_messages(context, update.effective_chat.id)
+
+        diesel_prihod_clear_staged(context)
+
+        record_id = context.user_data.get("diesel_prihod_editing_db_id") or context.user_data.get("diesel_prihod_current_id")
+
+        if record_id:
+            context.user_data["mode"] = "technadzor_diesel_prihod_card"
+
+            if diesel_prihod_row_to_context(record_id, context):
+                await show_diesel_prihod_db_card_after_edit(update.message, context, record_id)
+                return
+
         context.user_data["mode"] = "technadzor_diesel_prihod_list"
-        await update.message.reply_text("⛽ Текширувда турган дизел приходлар:", reply_markup=only_back_keyboard())
+        msg = await update.message.reply_text(
+            "⛽ Текширувда турган дизел приходлар:",
+            reply_markup=diesel_prihod_pending_keyboard()
+        )
+        remember_inline_message(context, msg)
+        return
+
+    if text == "⬅️ Орқага" and get_role(update) == "technadzor" and mode == "technadzor_diesel_prihod_card":
+        diesel_prihod_clear_staged(context)
+        context.user_data["mode"] = "technadzor_diesel_prihod_list"
         msg = await update.message.reply_text(
             "⛽ Текширувда турган дизел приходлар:",
             reply_markup=diesel_prihod_pending_keyboard()
@@ -4358,15 +4453,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         context.user_data["diesel_prihod_firm"] = firm_name
-
-        cursor.execute(
-            "UPDATE diesel_prihod SET note = %s WHERE id = %s",
-            (get_diesel_prihod_note_for_db(context), int(record_id))
-        )
-        conn.commit()
+        diesel_prihod_mark_staged(context, record_id)
 
         context.user_data["mode"] = "diesel_prihod_db_card"
-        await show_diesel_prihod_db_card_after_edit(update.message, context, record_id)
+        await show_diesel_prihod_staged_card(update.message, context, record_id)
         return
 
     if mode == "diesel_prihod_db_edit_liter":
@@ -4374,10 +4464,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_valid_liter_amount(text):
             await update.message.reply_text("❌ Нотўғри маълумот. Фақат сон киритинг.", reply_markup=back_keyboard())
             return
-        cursor.execute("UPDATE diesel_prihod SET liter = %s WHERE id = %s", (text.strip(), int(record_id)))
-        conn.commit()
+        context.user_data["diesel_prihod_liter"] = text.strip()
+        diesel_prihod_mark_staged(context, record_id)
+
         context.user_data["mode"] = "diesel_prihod_db_card"
-        await show_diesel_prihod_db_card_after_edit(update.message, context, record_id)
+        await show_diesel_prihod_staged_card(update.message, context, record_id)
         return
 
     if mode == "diesel_prihod_db_edit_note":
@@ -4385,16 +4476,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_valid_text_number_note(text):
             await update.message.reply_text("❌ Нотўғри маълумот. Фақат текст ва рақам киритинг.", reply_markup=back_keyboard())
             return
-        if diesel_prihod_row_to_context(record_id, context):
-            context.user_data["diesel_prihod_note"] = text.strip()
+        if not diesel_prihod_has_staged_for(context, record_id):
+            diesel_prihod_row_to_context(record_id, context)
 
-        cursor.execute(
-            "UPDATE diesel_prihod SET note = %s WHERE id = %s",
-            (get_diesel_prihod_note_for_db(context), int(record_id))
-        )
-        conn.commit()
+        context.user_data["diesel_prihod_note"] = text.strip()
+        diesel_prihod_mark_staged(context, record_id)
+
         context.user_data["mode"] = "diesel_prihod_db_card"
-        await show_diesel_prihod_db_card_after_edit(update.message, context, record_id)
+        await show_diesel_prihod_staged_card(update.message, context, record_id)
         return
 
     if mode == "other_diesel_video":
@@ -4437,14 +4526,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if mode in ["diesel_prihod_video", "diesel_prihod_edit_video"]:
+    if mode in ["diesel_prihod_video", "diesel_prihod_edit_video", "diesel_prihod_db_edit_video"]:
         await update.message.reply_text(
             "❌ Бу босқичда фақат 10 секунддан кам бўлмаган думалоқ видео қабул қилинади.",
             reply_markup=back_keyboard()
         )
         return
 
-    if mode in ["diesel_prihod_photo", "diesel_prihod_edit_photo"]:
+    if mode in ["diesel_prihod_photo", "diesel_prihod_edit_photo", "diesel_prihod_db_edit_photo"]:
         await update.message.reply_text(
             "❌ Бу босқичда фақат накладной расми қабул қилинади.",
             reply_markup=back_keyboard()
@@ -6453,6 +6542,36 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === Заправщик/Текширувчи: дизел приход callbacks ===
     if data.startswith("diesel_prihod_tech_edit|") or data.startswith("diesel_prihod_return_edit|"):
         parts = data.split("|")
+
+        if len(parts) == 2:
+            action, record_id = parts
+
+            if not diesel_prihod_row_to_context(record_id, context):
+                await query.answer("Маълумот топилмади.", show_alert=True)
+                return
+
+            context.user_data["diesel_prihod_editing_db_id"] = record_id
+            context.user_data["diesel_prihod_current_id"] = record_id
+            context.user_data["diesel_prihod_edit_source"] = "returned" if action == "diesel_prihod_return_edit" else "tech"
+            context.user_data["mode"] = "diesel_prihod_db_edit_menu"
+
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            edit_msg = await query.message.reply_text(
+                "✏️ Қайси маълумотни таҳрирлайсиз?",
+                reply_markup=diesel_prihod_edit_keyboard(f"{action}|{record_id}")
+            )
+            remember_inline_message(context, edit_msg)
+
+            await query.message.reply_text(
+                "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+                reply_markup=only_back_keyboard()
+            )
+            return
+
         if len(parts) == 3:
             action, record_id, field = parts
             if not diesel_prihod_row_to_context(record_id, context):
@@ -6477,19 +6596,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if field == "liter":
                 context.user_data["mode"] = "diesel_prihod_db_edit_liter"
-                await query.message.reply_text("⛽ Янги литрни киритинг. Фақат сон.", reply_markup=back_keyboard())
+                await query.message.reply_text("⛽ Янги литрни киритинг. Фақат сон.", reply_markup=only_back_keyboard())
                 return
             if field == "note":
                 context.user_data["mode"] = "diesel_prihod_db_edit_note"
-                await query.message.reply_text("📝 Янги изоҳни киритинг. Фақат текст ва рақам.", reply_markup=back_keyboard())
+                await query.message.reply_text("📝 Янги изоҳни киритинг. Фақат текст ва рақам.", reply_markup=only_back_keyboard())
                 return
             if field == "video":
                 context.user_data["mode"] = "diesel_prihod_db_edit_video"
-                await query.message.reply_text("🎥 Янги 10 секунддан кам бўлмаган думалоқ видеони юборинг.", reply_markup=back_keyboard())
+                await query.message.reply_text("🎥 Янги 10 секунддан кам бўлмаган думалоқ видеони юборинг.", reply_markup=only_back_keyboard())
                 return
             if field == "photo":
                 context.user_data["mode"] = "diesel_prihod_db_edit_photo"
-                await query.message.reply_text("🖼 Янги накладной расмини юборинг.", reply_markup=back_keyboard())
+                await query.message.reply_text("🖼 Янги накладной расмини юборинг.", reply_markup=only_back_keyboard())
                 return
 
     if data == "other_diesel_cancel":
@@ -6657,30 +6776,32 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "diesel_prihod_edit_liter":
         await query.edit_message_reply_markup(reply_markup=None)
         context.user_data["mode"] = "diesel_prihod_edit_liter"
-        await query.message.reply_text("⛽ Янги литрни киритинг. Фақат сон.", reply_markup=back_keyboard())
+        await query.message.reply_text("⛽ Янги литрни киритинг. Фақат сон.", reply_markup=only_back_keyboard())
         return
 
     if data == "diesel_prihod_edit_note":
         await query.edit_message_reply_markup(reply_markup=None)
         context.user_data["mode"] = "diesel_prihod_edit_note"
-        await query.message.reply_text("📝 Янги изоҳни киритинг. Фақат текст ва рақам.", reply_markup=back_keyboard())
+        await query.message.reply_text("📝 Янги изоҳни киритинг. Фақат текст ва рақам.", reply_markup=only_back_keyboard())
         return
 
     if data == "diesel_prihod_edit_video":
         await query.edit_message_reply_markup(reply_markup=None)
         context.user_data["mode"] = "diesel_prihod_edit_video"
-        await query.message.reply_text("🎥 Янги 10 секунддан кам бўлмаган думалоқ видеони юборинг.", reply_markup=back_keyboard())
+        await query.message.reply_text("🎥 Янги 10 секунддан кам бўлмаган думалоқ видеони юборинг.", reply_markup=only_back_keyboard())
         return
 
     if data == "diesel_prihod_edit_photo":
         await query.edit_message_reply_markup(reply_markup=None)
         context.user_data["mode"] = "diesel_prihod_edit_photo"
-        await query.message.reply_text("🖼 Янги накладной расмини юборинг.", reply_markup=back_keyboard())
+        await query.message.reply_text("🖼 Янги накладной расмини юборинг.", reply_markup=only_back_keyboard())
         return
 
     if data.startswith("diesel_prihod_approve|"):
         record_id = data.split("|", 1)[1]
         try:
+            await apply_diesel_prihod_staged_edits(context, record_id)
+
             cursor.execute("""
                 UPDATE diesel_prihod
                 SET status = %s
@@ -6745,24 +6866,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             if field == "liter":
                 context.user_data["mode"] = "diesel_prihod_db_edit_liter"
-                await query.message.reply_text("⛽ Янги литрни киритинг. Фақат сон.", reply_markup=back_keyboard())
+                await query.message.reply_text("⛽ Янги литрни киритинг. Фақат сон.", reply_markup=only_back_keyboard())
                 return
             if field == "note":
                 context.user_data["mode"] = "diesel_prihod_db_edit_note"
-                await query.message.reply_text("📝 Янги изоҳни киритинг. Фақат текст ва рақам.", reply_markup=back_keyboard())
+                await query.message.reply_text("📝 Янги изоҳни киритинг. Фақат текст ва рақам.", reply_markup=only_back_keyboard())
                 return
             if field == "video":
                 context.user_data["mode"] = "diesel_prihod_db_edit_video"
-                await query.message.reply_text("🎥 Янги 10 секунддан кам бўлмаган думалоқ видеони юборинг.", reply_markup=back_keyboard())
+                await query.message.reply_text("🎥 Янги 10 секунддан кам бўлмаган думалоқ видеони юборинг.", reply_markup=only_back_keyboard())
                 return
             if field == "photo":
                 context.user_data["mode"] = "diesel_prihod_db_edit_photo"
-                await query.message.reply_text("🖼 Янги накладной расмини юборинг.", reply_markup=back_keyboard())
+                await query.message.reply_text("🖼 Янги накладной расмини юборинг.", reply_markup=only_back_keyboard())
                 return
 
     if data.startswith("diesel_prihod_resend|"):
         record_id = data.split("|", 1)[1]
         try:
+            await apply_diesel_prihod_staged_edits(context, record_id)
+
             cursor.execute("""
                 UPDATE diesel_prihod
                 SET status = %s,
@@ -6810,19 +6933,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             if field == "liter":
                 context.user_data["mode"] = "diesel_prihod_db_edit_liter"
-                await query.message.reply_text("⛽ Янги литрни киритинг. Фақат сон.", reply_markup=back_keyboard())
+                await query.message.reply_text("⛽ Янги литрни киритинг. Фақат сон.", reply_markup=only_back_keyboard())
                 return
             if field == "note":
                 context.user_data["mode"] = "diesel_prihod_db_edit_note"
-                await query.message.reply_text("📝 Янги изоҳни киритинг. Фақат текст ва рақам.", reply_markup=back_keyboard())
+                await query.message.reply_text("📝 Янги изоҳни киритинг. Фақат текст ва рақам.", reply_markup=only_back_keyboard())
                 return
             if field == "video":
                 context.user_data["mode"] = "diesel_prihod_db_edit_video"
-                await query.message.reply_text("🎥 Янги 10 секунддан кам бўлмаган думалоқ видеони юборинг.", reply_markup=back_keyboard())
+                await query.message.reply_text("🎥 Янги 10 секунддан кам бўлмаган думалоқ видеони юборинг.", reply_markup=only_back_keyboard())
                 return
             if field == "photo":
                 context.user_data["mode"] = "diesel_prihod_db_edit_photo"
-                await query.message.reply_text("🖼 Янги накладной расмини юборинг.", reply_markup=back_keyboard())
+                await query.message.reply_text("🖼 Янги накладной расмини юборинг.", reply_markup=only_back_keyboard())
                 return
 
     if data.startswith("diesel_prihod_return_cancel|"):
@@ -10044,6 +10167,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.user_data.get("diesel_prihod_time"):
             context.user_data["diesel_prihod_time"] = now_text()
 
+        if mode == "diesel_prihod_db_edit_photo":
+            record_id = context.user_data.get("diesel_prihod_editing_db_id")
+            if not diesel_prihod_has_staged_for(context, record_id):
+                diesel_prihod_row_to_context(record_id, context)
+
+            context.user_data["diesel_prihod_photo_id"] = photo.file_id
+            diesel_prihod_mark_staged(context, record_id)
+
+            context.user_data["mode"] = "diesel_prihod_db_card"
+            await show_diesel_prihod_staged_card(update.message, context, record_id)
+            return
+
         context.user_data["mode"] = "diesel_prihod_confirm"
         await update.message.reply_text(diesel_prihod_card_text(context), reply_markup=diesel_prihod_confirm_keyboard())
         return
@@ -10206,16 +10341,24 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode in ["diesel_prihod_video", "diesel_prihod_edit_video"]:
-        if not update.message.video_note:
+        video_file_id = None
+        duration = 0
+
+        if update.message.video_note:
+            video_file_id = update.message.video_note.file_id
+            duration = update.message.video_note.duration or 0
+        elif update.message.video:
+            video_file_id = update.message.video.file_id
+            duration = update.message.video.duration or 0
+        else:
             await update.message.reply_text("❌ Фақат думалоқ видео юборинг.", reply_markup=back_keyboard())
             return
 
-        duration = update.message.video_note.duration or 0
         if duration < 10:
             await update.message.reply_text("❌ Видео 10 секунддан кам бўлмасин. Қайта юборинг.", reply_markup=back_keyboard())
             return
 
-        context.user_data["diesel_prihod_video_id"] = update.message.video_note.file_id
+        context.user_data["diesel_prihod_video_id"] = video_file_id
 
         if mode == "diesel_prihod_edit_video":
             context.user_data["mode"] = "diesel_prihod_confirm"
@@ -10224,10 +10367,14 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if mode == "diesel_prihod_db_edit_video":
             record_id = context.user_data.get("diesel_prihod_editing_db_id")
-            cursor.execute("UPDATE diesel_prihod SET video_id = %s WHERE id = %s", (update.message.video_note.file_id, int(record_id)))
-            conn.commit()
+            if not diesel_prihod_has_staged_for(context, record_id):
+                diesel_prihod_row_to_context(record_id, context)
+
+            context.user_data["diesel_prihod_video_id"] = video_file_id
+            diesel_prihod_mark_staged(context, record_id)
+
             context.user_data["mode"] = "diesel_prihod_db_card"
-            await show_diesel_prihod_db_card_after_edit(update.message, context, record_id)
+            await show_diesel_prihod_staged_card(update.message, context, record_id)
             return
 
         context.user_data["mode"] = "diesel_prihod_photo"
