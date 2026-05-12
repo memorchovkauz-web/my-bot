@@ -3256,6 +3256,10 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
 
     from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, created_at = row
 
+    if to_driver_id is None:
+        print(f"DIESEL TRANSFER AUTO APPROVED: transfer_id={transfer_id}, to_car={to_car}, no receiver driver")
+        return
+
     from_driver = get_driver_by_car(from_car)
     to_driver = get_driver_by_car(to_car)
 
@@ -8967,18 +8971,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             liter,
             note,
             video_id,
-            "Қабул қилувчи текширувида"
+            transfer_status
         ))
 
         transfer_id = cursor.fetchone()[0]
         conn.commit()
 
-        await send_diesel_transfer_to_receiver(context, transfer_id)
+        if auto_approved:
+            await query.message.reply_text(
+                "✅ Дизел расход автоматик тасдиқланди.\n"
+                "Сабаб: ушбу техникага ҳайдовчи бириктирилмаган.",
+                reply_markup=diesel_report_keyboard()
+            )
+        else:
+            await send_diesel_transfer_to_receiver(context, transfer_id)
 
-        await query.message.reply_text(
-            "✅ Дизел бериш маълумоти сақланди ва олувчи ҳайдовчига юборилди.",
-            reply_markup=diesel_report_keyboard()
-        )
+            await query.message.reply_text(
+                "✅ Дизел бериш маълумоти сақланди ва олувчи ҳайдовчига юборилди.",
+                reply_markup=diesel_report_keyboard()
+            )
 
         context.user_data.clear()
         context.user_data["mode"] = "diesel_menu"
