@@ -10159,7 +10159,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Бу босқичда расм қабул қилинмайди. Тўғри маълумот киритинг.", reply_markup=back_keyboard())
         return
 
-    if mode in ["diesel_prihod_photo", "diesel_prihod_edit_photo"]:
+    if mode in ["diesel_prihod_photo", "diesel_prihod_edit_photo", "diesel_prihod_db_edit_photo"]:
         photo = update.message.photo[-1]
         context.user_data["diesel_prihod_photo_id"] = photo.file_id
         context.user_data["diesel_prihod_telegram_id"] = update.effective_user.id
@@ -10340,7 +10340,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Бу босқичда видео қабул қилинмайди. Тўғри маълумот киритинг.", reply_markup=back_keyboard())
         return
 
-    if mode in ["diesel_prihod_video", "diesel_prihod_edit_video"]:
+    if mode in ["diesel_prihod_video", "diesel_prihod_edit_video", "diesel_prihod_db_edit_video"]:
         video_file_id = None
         duration = 0
 
