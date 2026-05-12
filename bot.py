@@ -6950,6 +6950,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("diesel_prihod_return_cancel|"):
         record_id = data.split("|", 1)[1]
+
+        try:
+            cursor.execute("DELETE FROM diesel_prihod WHERE id = %s", (int(record_id),))
+            conn.commit()
+        except Exception as e:
+            print("DIESEL PRIHOD CANCEL DELETE ERROR:", e)
         try:
             cursor.execute("DELETE FROM diesel_prihod WHERE id = %s", (int(record_id),))
             conn.commit()
@@ -10856,3 +10862,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+# === V64 BACK LOGIC ===
+# Edit menu back -> card
+# Card back -> pending list
