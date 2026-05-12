@@ -4344,15 +4344,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode == "diesel_prihod_db_edit_firm":
         record_id = context.user_data.get("diesel_prihod_editing_db_id")
-        if text not in FIRM_NAMES:
-            await update.message.reply_text("❌ Фирмани пастки менюдан танланг.", reply_markup=firm_back_keyboard())
+        firm_name = extract_firm_from_stock_button(text)
+
+        if firm_name not in FIRM_NAMES:
+            await update.message.reply_text(
+                "❌ Фирмани пастки менюдан танланг.",
+                reply_markup=diesel_prihod_firm_stock_keyboard()
+            )
             return
 
         if not diesel_prihod_row_to_context(record_id, context):
             await update.message.reply_text("❌ Маълумот топилмади.", reply_markup=zapravshik_diesel_menu_keyboard())
             return
 
-        context.user_data["diesel_prihod_firm"] = text
+        context.user_data["diesel_prihod_firm"] = firm_name
 
         cursor.execute(
             "UPDATE diesel_prihod SET note = %s WHERE id = %s",
