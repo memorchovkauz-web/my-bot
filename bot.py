@@ -1656,14 +1656,19 @@ def diesel_prihod_confirm_keyboard():
     ])
 
 
-def diesel_prihod_sender_returned_keyboard(record_id):
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_prihod_resend|{record_id}"),
-            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_prihod_return_edit|{record_id}"),
-        ],
-        [InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_prihod_return_cancel|{record_id}")]
+def diesel_prihod_sender_returned_keyboard(record_id, has_media=True):
+    rows = []
+
+    if has_media:
+        rows.append([InlineKeyboardButton("👁 Кўриш", callback_data=f"diesel_prihod_return_media|{record_id}")])
+
+    rows.append([
+        InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_prihod_resend|{record_id}"),
+        InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_prihod_return_edit|{record_id}"),
     ])
+    rows.append([InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_prihod_return_cancel|{record_id}")])
+
+    return InlineKeyboardMarkup(rows)
 
 
 def diesel_prihod_technadzor_keyboard(record_id, has_media=True):
@@ -1695,6 +1700,16 @@ def diesel_prihod_technadzor_after_view_keyboard(record_id):
             InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_prihod_tech_edit|{record_id}"),
         ],
         [InlineKeyboardButton("❌ Рад этиш", callback_data=f"diesel_prihod_reject|{record_id}")]
+    ])
+
+
+def diesel_prihod_sender_returned_after_view_keyboard(record_id):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_prihod_resend|{record_id}"),
+            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_prihod_return_edit|{record_id}"),
+        ],
+        [InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_prihod_return_cancel|{record_id}")]
     ])
 
 
@@ -1874,7 +1889,7 @@ async def send_diesel_prihod_returned_to_sender(context, record_id, reason):
         await context.bot.send_message(
             chat_id=int(sender_id),
             text=card_text,
-            reply_markup=diesel_prihod_sender_returned_keyboard(record_id)
+            reply_markup=diesel_prihod_sender_returned_keyboard(record_id, has_media=diesel_prihod_has_media(context))
         )
     except Exception as e:
         print("SEND DIESEL PRIHOD RETURNED ERROR:", e)
