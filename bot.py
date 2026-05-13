@@ -31,6 +31,88 @@ from telegram.ext import (
 
 from telegram.error import BadRequest
 
+TOKEN = os.getenv("BOT_TOKEN")
+
+# ================= KEEP ALIVE + WEBHOOK SERVER v10 =================
+# Render Web Service free plan portни тез кўриши учун HTTP server
+# DB/Google Sheets оғир инициализациясидан ОЛДИН старт бўлади.
+# Бу блок bot flow, callback, DB status ва меню структурасига тегмайди.
+MAIN_LOOP = None
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        # UptimeRobot health check log'ларини кўпайтирмаслик учун.
+        return
+
+    def do_GET(self):
+        if self.path == "/" or self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Bot is running")
+            return
+
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK")
+        return
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        return
+
+    def do_POST(self):
+        # App ҳали тайёр бўлмаса, Telegram қайта-қайта юбориб ботни оғирлаштирмаслиги учун OK қайтарамиз.
+        if MAIN_LOOP is None or "app" not in globals() or not TOKEN:
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+            return
+
+        expected_path = f"/{TOKEN}"
+        if self.path != expected_path:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"Not found")
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            raw_body = self.rfile.read(content_length)
+            update_data = json.loads(raw_body.decode("utf-8"))
+            telegram_update = Update.de_json(update_data, app.bot)
+
+            asyncio.run_coroutine_threadsafe(
+                app.process_update(telegram_update),
+                MAIN_LOOP
+            )
+
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+            return
+        except Exception as e:
+            print("WEBHOOK POST ERROR:", e)
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+            return
+
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    print(f"KEEP ALIVE SERVER STARTED ON PORT {port}")
+    server.serve_forever()
+
+# Render портни DB/Sheetsдан олдин кўриши учун server дарҳол старт олади.
+threading.Thread(target=run_server, daemon=True).start()
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 TASHKENT_TZ = ZoneInfo("Asia/Tashkent")
@@ -205,8 +287,6 @@ CREATE TABLE IF NOT EXISTS diesel_other_expense (
 
 
 conn.commit()
-
-TOKEN = os.getenv("BOT_TOKEN")
 
 USERS = {
     492894595: {"role": "director", "name": "Jahongir Ganiyev"},
@@ -724,6 +804,15 @@ def diesel_sender_display_name(from_car, from_driver_id=None, context=None):
         return giver_name or "Заправщик"
 
     return str(from_car or "-")
+
+
+def diesel_sender_line(from_car, from_driver_id=None, context=None):
+    # Заправщик берган дизелда "Заправщик" техника номи эмас, Ф.И.Ш. кўринади.
+    # DBдаги from_car структураси ўзгармайди.
+    from_display = diesel_sender_display_name(from_car, from_driver_id=from_driver_id, context=context)
+    if str(from_car or "").strip() == "Заправщик":
+        return f"🚛 Дизел берган: {from_display}"
+    return f"🚛 Дизел берган техника номери: {from_display}"
 
 
 def work_role_title(work_role):
@@ -3219,11 +3308,9 @@ async def send_gas_transfer_to_receiver(context, transfer_id):
 
     from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id, created_at = row
 
-    from_driver = get_driver_by_car(from_car)
-    to_driver = get_driver_by_car(to_car)
-
-    from_driver_name = short_driver_name(from_driver)
-    to_driver_name = short_driver_name(to_driver)
+    from_driver_name = ""
+    if str(from_car or "").strip() != "Заправщик":
+        from_driver_name = short_driver_name(get_driver_by_car(from_car))
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
     note = note or ""
@@ -4008,11 +4095,9 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
         print(f"DIESEL TRANSFER AUTO APPROVED: transfer_id={transfer_id}, to_car={to_car}, no receiver driver")
         return
 
-    from_driver = get_driver_by_car(from_car)
-    to_driver = get_driver_by_car(to_car)
-
-    from_driver_name = short_driver_name(from_driver)
-    to_driver_name = short_driver_name(to_driver)
+    from_driver_name = ""
+    if str(from_car or "").strip() != "Заправщик":
+        from_driver_name = short_driver_name(get_driver_by_car(from_car))
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
@@ -4095,7 +4180,7 @@ async def notify_diesel_sender_rejected(context, transfer_id, reason):
             "❌ ДИЗЕЛ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
             f"🕒 Вақт: {created_text}\n"
             f"🏢 Фирма: {firm}\n"
-            f"🚛 Дизел берган техника: {from_car}\n"
+            f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
             f"🚛 Дизел олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n\n"
@@ -4111,6 +4196,7 @@ async def notify_diesel_receiver_rejected(context, transfer_id, reason):
     cursor.execute("""
         SELECT
             to_driver_id,
+            from_driver_id,
             from_car,
             to_car,
             firm,
@@ -4127,7 +4213,7 @@ async def notify_diesel_receiver_rejected(context, transfer_id, reason):
     if not row:
         return
 
-    to_driver_id, from_car, to_car, firm, liter, note, video_id, created_at = row
+    to_driver_id, from_driver_id, from_car, to_car, firm, liter, note, video_id, created_at = row
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
@@ -4137,7 +4223,7 @@ async def notify_diesel_receiver_rejected(context, transfer_id, reason):
             "❌ ДИЗЕЛ ОЛИШ РАД ЭТИЛДИ\n\n"
             f"🕒 Вақт: {created_text}\n"
             f"🏢 Фирма: {firm}\n"
-            f"🚛 Дизел берган: {from_car}\n"
+            f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
             f"🚛 Дизел олган: {to_car}\n"
             f"📝 Изоҳ: {note}\n"
             f"⛽ Литр: {liter}\n\n"
@@ -4207,11 +4293,9 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
 
     from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, created_at = row
 
-    from_driver = get_driver_by_car(from_car)
-    to_driver = get_driver_by_car(to_car)
-
-    from_driver_name = short_driver_name(from_driver)
-    to_driver_name = short_driver_name(to_driver)
+    from_driver_name = ""
+    if str(from_car or "").strip() != "Заправщик":
+        from_driver_name = short_driver_name(get_driver_by_car(from_car))
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
@@ -4256,7 +4340,7 @@ async def notify_diesel_sender_confirmed(context, transfer_id):
         chat_id=int(from_driver_id),
         text=(
             "✅ Дизел бериш маълумотингиз тасдиқланди.\n\n"
-            f"🚛 Берган техника: {from_car}\n"
+            f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
             f"🚛 Олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             "📌 Статус: Қабул қилинди"
@@ -4293,7 +4377,7 @@ async def notify_diesel_sender_rejected(context, transfer_id, reason):
             "❌ ДИЗЕЛ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
             f"🕒 Вақт: {created_text}\n"
             f"🏢 Фирма: {firm}\n"
-            f"🚛 Дизел берган техника: {from_car}\n"
+            f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
             f"🚛 Дизел олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n\n"
@@ -4308,6 +4392,7 @@ async def notify_diesel_receiver_rejected(context, transfer_id, reason):
     cursor.execute("""
         SELECT
             to_driver_id,
+            from_driver_id,
             from_car,
             to_car,
             firm,
@@ -4324,7 +4409,7 @@ async def notify_diesel_receiver_rejected(context, transfer_id, reason):
     if not row:
         return
 
-    to_driver_id, from_car, to_car, firm, liter, note, video_id, created_at = row
+    to_driver_id, from_driver_id, from_car, to_car, firm, liter, note, video_id, created_at = row
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
@@ -9648,7 +9733,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ ДИЗЕЛ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
             f"🕒 Вақт: {created_text}\n"
             f"🏢 Фирма: {firm}\n"
-            f"🚛 Дизел берган: {from_car}\n"
+            f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
             f"🚛 Дизел олган: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n"
@@ -9727,6 +9812,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("""
             SELECT
                 to_driver_id,
+                from_driver_id,
                 from_car,
                 to_car,
                 firm,
@@ -9745,7 +9831,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ Маълумот топилмади.")
             return
 
-        to_driver_id, from_car, to_car, firm, liter, note, video_id, receiver_comment, created_at = row
+        to_driver_id, from_driver_id, from_car, to_car, firm, liter, note, video_id, receiver_comment, created_at = row
 
         if int(update.effective_user.id) != int(to_driver_id):
             await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
@@ -9761,7 +9847,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ ДИЗЕЛ ОЛИШ РАД ЭТИЛДИ\n\n"
             f"🕒 Вақт: {created_text}\n"
             f"🏢 Фирма: {firm}\n"
-            f"🚛 Дизел берган: {from_car}\n"
+            f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
             f"🚛 Дизел олган: {to_car}\n"
             f"📝 Изоҳ: {note}\n"
             f"⛽ Литр: {liter}\n\n"
@@ -10329,7 +10415,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⛽ ДИЗЕЛ МАЪЛУМОТИ\n\n"
             f"🕒 Вақт: {created_text}\n"
             f"🏢 Фирма: {firm}\n"
-            f"🚛 Дизел берган техника: {from_car}\n"
+            f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
             f"🚛 Дизел олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n"
@@ -10528,7 +10614,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ ДИЗЕЛ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
             f"🕒 Вақт: {created_text}\n"
             f"🏢 Фирма: {firm}\n"
-            f"🚛 Дизел берган техника: {from_car}\n"
+            f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
             f"🚛 Дизел олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n\n"
@@ -10652,6 +10738,7 @@ async def diesel_rejected_view(update: Update, context: ContextTypes.DEFAULT_TYP
 
     cursor.execute("""
         SELECT
+            from_driver_id,
             from_car,
             to_car,
             firm,
@@ -10668,7 +10755,7 @@ async def diesel_rejected_view(update: Update, context: ContextTypes.DEFAULT_TYP
     if not row:
         return
 
-    from_car, to_car, firm, liter, note, reject_reason, created_at = row
+    from_driver_id, from_car, to_car, firm, liter, note, reject_reason, created_at = row
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
@@ -10676,7 +10763,7 @@ async def diesel_rejected_view(update: Update, context: ContextTypes.DEFAULT_TYP
         "❌ ДИЗЕЛ ОЛИШ РАД ЭТИЛДИ\n\n"
         f"🕒 Вақт: {created_text}\n"
         f"🏢 Фирма: {firm}\n"
-        f"🚛 Дизел берган: {from_car}\n"
+        f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
         f"🚛 Дизел олган: {to_car}\n"
         f"📝 Изоҳ: {note}\n"
         f"⛽ Литр: {liter}\n\n"
@@ -12118,81 +12205,6 @@ app.add_handler(MessageHandler(filters.VIDEO_NOTE | filters.VIDEO, handle_video)
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 
-MAIN_LOOP = None
-
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        # UptimeRobot health check log'larini кўпайтирмаслик учун.
-        return
-
-    def do_GET(self):
-        # UptimeRobot шу root URL'ни текширади.
-        if self.path == "/" or self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"Bot is running")
-            return
-
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"OK")
-        return
-
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        return
-
-    def do_POST(self):
-        expected_path = f"/{TOKEN}"
-
-        if self.path != expected_path:
-            self.send_response(404)
-            self.end_headers()
-            self.wfile.write(b"Not found")
-            return
-
-        try:
-            content_length = int(self.headers.get("Content-Length", 0))
-            raw_body = self.rfile.read(content_length)
-
-            update_data = json.loads(raw_body.decode("utf-8"))
-            telegram_update = Update.de_json(update_data, app.bot)
-
-            if MAIN_LOOP is None:
-                raise RuntimeError("MAIN_LOOP is not ready")
-
-            asyncio.run_coroutine_threadsafe(
-                app.process_update(telegram_update),
-                MAIN_LOOP
-            )
-
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"OK")
-            return
-
-        except Exception as e:
-            print("WEBHOOK POST ERROR:", e)
-            # Telegram қайта-қайта юбормаслиги учун 200 қайтарамиз.
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"OK")
-            return
-
-
-def run_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), Handler)
-    server.serve_forever()
-
-
 async def main():
     global MAIN_LOOP
 
@@ -12215,9 +12227,7 @@ async def main():
 
     await app.start()
 
-    threading.Thread(target=run_server, daemon=True).start()
-
-    print("BOT STARTED DEPENDENCY-FREE HYBRID WEBHOOK + HEALTH SERVER")
+    print("BOT STARTED DEPENDENCY-FREE HYBRID WEBHOOK + EARLY HEALTH SERVER")
     print(f"HEALTH URL: {render_url}/")
     print(f"WEBHOOK URL: {webhook_url}")
 
