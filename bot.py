@@ -1909,6 +1909,121 @@ def diesel_pending_sender_view_keyboard(transfer_id, has_media=True):
         rows.append([InlineKeyboardButton("👁 Кўриш", callback_data=f"znotif_diesel_pending_media|{transfer_id}")])
     return InlineKeyboardMarkup(rows)
 
+
+def diesel_transfer_sender_after_view_keyboard(transfer_id, rejected=True):
+    if rejected:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_rejected_resend|{transfer_id}")],
+            [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_rejected_edit|{transfer_id}")],
+            [InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_rejected_cancel|{transfer_id}")],
+        ])
+    return InlineKeyboardMarkup([])
+
+
+async def send_zapravshik_prihod_notification_card(query, context, record_id, returned=True):
+    if not diesel_prihod_row_to_context(record_id, context):
+        await query.answer("Маълумот топилмади.", show_alert=True)
+        return
+
+    if int(context.user_data.get("diesel_prihod_telegram_id") or 0) != int(query.from_user.id):
+        await query.answer("Бу маълумот сиз учун эмас.", show_alert=True)
+        return
+
+    try:
+        await query.message.delete()
+    except Exception:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+    status = "Қайтди" if returned else "Текширувда"
+    receiver_comment = context.user_data.get("diesel_prihod_receiver_comment") if returned else None
+
+    if returned:
+        reply_markup = diesel_prihod_sender_returned_keyboard(
+            record_id,
+            has_media=diesel_prihod_has_media(context)
+        )
+    else:
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👁 Кўриш", callback_data=f"znotif_prihod_pending_media|{record_id}")]
+        ]) if diesel_prihod_has_media(context) else None
+
+    msg = await query.message.chat.send_message(
+        diesel_prihod_card_text(context, status=status, receiver_comment=receiver_comment),
+        reply_markup=reply_markup
+    )
+    remember_inline_message(context, msg)
+
+
+async def send_zapravshik_diesel_notification_card(query, context, transfer_id, rejected=True):
+    row = get_diesel_transfer_full_row(transfer_id)
+    if not row:
+        await query.answer("Маълумот топилмади.", show_alert=True)
+        return
+
+    if int(row[1] or 0) != int(query.from_user.id):
+        await query.answer("Бу маълумот сиз учун эмас.", show_alert=True)
+        return
+
+    try:
+        await query.message.delete()
+    except Exception:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+    status_text = "Рад этилди" if rejected else "Қабул қилувчи текширувида"
+    if rejected:
+        reply_markup = diesel_rejected_sender_keyboard_conditional(transfer_id, has_media=bool(row[8]))
+    else:
+        reply_markup = diesel_pending_sender_view_keyboard(transfer_id, has_media=bool(row[8]))
+
+    msg = await query.message.chat.send_message(
+        diesel_transfer_sender_card_text(row, status_text=status_text),
+        reply_markup=reply_markup
+    )
+    remember_inline_message(context, msg)
+
+
+async def send_zapravshik_prihod_pending_media(query, context, record_id):
+    if not diesel_prihod_row_to_context(record_id, context):
+        await query.answer("Маълумот топилмади.", show_alert=True)
+        return
+
+    if int(context.user_data.get("diesel_prihod_telegram_id") or 0) != int(query.from_user.id):
+        await query.answer("Бу маълумот сиз учун эмас.", show_alert=True)
+        return
+
+    try:
+        await query.message.delete()
+    except Exception:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+    await query.message.chat.send_message(diesel_prihod_card_text(context, status="Текширувда"))
+
+    photo_id = context.user_data.get("diesel_prihod_photo_id")
+    if photo_id:
+        try:
+            await query.message.chat.send_photo(photo=photo_id)
+        except Exception as e:
+            print("ZNOTIF PRIHOD PENDING PHOTO ERROR:", e)
+
+    video_id = context.user_data.get("diesel_prihod_video_id")
+    if video_id:
+        try:
+            await query.message.chat.send_video_note(video_note=video_id)
+        except Exception:
+            try:
+                await query.message.chat.send_video(video=video_id)
+            except Exception as e:
+                print("ZNOTIF PRIHOD PENDING VIDEO ERROR:", e)
+
 def other_diesel_card_text(context, status="------"):
     return (
         "➖ БОШҚА ДИЗЕЛ РАСХОД\n\n"
@@ -7075,6 +7190,63 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "none":
+        return
+
+    # === V74: Заправшик уведомления рўйхатидан карточка очиш ===
+    if data.startswith("znotif_prihod_return|"):
+        record_id = data.split("|", 1)[1]
+        await send_zapravshik_prihod_notification_card(query, context, record_id, returned=True)
+        return
+
+    if data.startswith("znotif_prihod_pending|"):
+        record_id = data.split("|", 1)[1]
+        await send_zapravshik_prihod_notification_card(query, context, record_id, returned=False)
+        return
+
+    if data.startswith("znotif_diesel_rejected|"):
+        transfer_id = data.split("|", 1)[1]
+        await send_zapravshik_diesel_notification_card(query, context, transfer_id, rejected=True)
+        return
+
+    if data.startswith("znotif_diesel_pending|"):
+        transfer_id = data.split("|", 1)[1]
+        await send_zapravshik_diesel_notification_card(query, context, transfer_id, rejected=False)
+        return
+
+    if data.startswith("znotif_prihod_pending_media|"):
+        record_id = data.split("|", 1)[1]
+        await send_zapravshik_prihod_pending_media(query, context, record_id)
+        return
+
+    if data.startswith("znotif_diesel_pending_media|"):
+        transfer_id = data.split("|", 1)[1]
+        row = get_diesel_transfer_full_row(transfer_id)
+        if not row:
+            await query.answer("Маълумот топилмади.", show_alert=True)
+            return
+
+        if int(row[1] or 0) != int(query.from_user.id):
+            await query.answer("Бу маълумот сиз учун эмас.", show_alert=True)
+            return
+
+        try:
+            await query.message.delete()
+        except Exception:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+        await query.message.chat.send_message(
+            diesel_transfer_sender_card_text(row, status_text="Қабул қилувчи текширувида")
+        )
+
+        video_id = row[8]
+        if video_id:
+            try:
+                await query.message.chat.send_video_note(video_note=video_id)
+            except Exception:
+                await safe_send_video(context.bot, query.message.chat_id, video_id)
         return
 
     # === PRIORITY FIX: дизел приход медиа кўриш ===
