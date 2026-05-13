@@ -876,9 +876,30 @@ def remember_inline_message(context, msg):
         print("REMEMBER INLINE MESSAGE ERROR:", e)
 
 
+def remember_inline_message_for_chat(context, chat_id, msg):
+    """
+    Бошқа user'га bot.send_message орқали юборилган inline кнопкали
+    хабарларни ҳам кейин ўчириш учун сақлаб қўяди.
+    """
+    try:
+        if not msg or not getattr(msg, "message_id", None) or not chat_id:
+            return
+        key = f"all_inline_message_ids:{int(chat_id)}"
+        ids = context.bot_data.setdefault(key, [])
+        if msg.message_id not in ids:
+            ids.append(msg.message_id)
+    except Exception as e:
+        print("REMEMBER INLINE MESSAGE FOR CHAT ERROR:", e)
+
+
 async def clear_all_inline_messages(context, chat_id):
     try:
         ids = list(context.user_data.get("all_inline_message_ids", []))
+
+        bot_data_key = f"all_inline_message_ids:{int(chat_id)}"
+        for value in list(context.bot_data.get(bot_data_key, [])):
+            if value and value not in ids:
+                ids.append(value)
 
         for key in ["technadzor_staff_message_id", "technadzor_staff_inline_message_id"]:
             value = context.user_data.get(key)
@@ -896,6 +917,10 @@ async def clear_all_inline_messages(context, chat_id):
                 pass
 
         context.user_data["all_inline_message_ids"] = []
+        try:
+            context.bot_data[f"all_inline_message_ids:{int(chat_id)}"] = []
+        except Exception:
+            pass
     except Exception as e:
         print("CLEAR ALL INLINE MESSAGES ERROR:", e)
 
@@ -3850,8 +3875,7 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
 
     await context.bot.send_message(
         chat_id=int(to_driver_id),
-        text=message_text,
-        reply_markup=diesel_receiver_keyboard(transfer_id)
+        text=message_text
     )
 
 
@@ -3903,7 +3927,7 @@ async def notify_diesel_sender_rejected(context, transfer_id, reason):
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
-    await context.bot.send_message(
+    msg = await context.bot.send_message(
         chat_id=int(from_driver_id),
         text=(
             "❌ ДИЗЕЛ МАЪЛУМОТИ РАД ЭТИЛДИ\n\n"
@@ -3919,6 +3943,7 @@ async def notify_diesel_sender_rejected(context, transfer_id, reason):
         ),
         reply_markup=diesel_rejected_sender_keyboard(transfer_id)
     )
+    remember_inline_message_for_chat(context, from_driver_id, msg)
 
 async def notify_diesel_receiver_rejected(context, transfer_id, reason):
     cursor.execute("""
@@ -3944,7 +3969,7 @@ async def notify_diesel_receiver_rejected(context, transfer_id, reason):
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
-    await context.bot.send_message(
+    msg = await context.bot.send_message(
         chat_id=int(to_driver_id),
         text=(
             "❌ ДИЗЕЛ ОЛИШ РАД ЭТИЛДИ\n\n"
@@ -3959,6 +3984,7 @@ async def notify_diesel_receiver_rejected(context, transfer_id, reason):
         ),
         reply_markup=diesel_rejected_receiver_keyboard(transfer_id)
     )
+    remember_inline_message_for_chat(context, to_driver_id, msg)
 
 
 # === DIESEL RECEIVER CONFIRM FLOW HELPERS START ===
@@ -4044,8 +4070,7 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
 
     await context.bot.send_message(
         chat_id=int(to_driver_id),
-        text=message_text,
-        reply_markup=diesel_receiver_keyboard(transfer_id)
+        text=message_text
     )
 
 
@@ -4757,6 +4782,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
+
+    # === V77: Заправшик ва дизел ҳайдовчи меню алмашганда юқоридаги inline кнопкалар ўчсин ===
+    if get_role(update) in ["zapravshik", "driver"] and text in [
+        "⛽ Ёқилғи ҳисоботи",
+        "✅ ДИЗЕЛ олишни тасдиқлаш",
+        "⛽ ДИЗЕЛ бериш",
+        "⛽ ГАЗ олиш",
+        "⛽ ГАЗ бериш",
+        "🟡 Дизел бўлими",
+        "➕ Дизел приход",
+        "➖ Дизел расход",
+        "🔔 Уведомления",
+        "📩 Приход/Расход хабарлари",
+        "⏳ Тасдиқлаш ҳолати",
+        "⬅️ Орқага",
+    ]:
+        await clear_all_inline_messages(context, update.effective_chat.id)
+
     # === V76: Заправшик уведомления карточкасидан Орқага -> рўйхат ===
     if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode in [
         "zapravshik_notif_prihod_return_card",
@@ -5864,11 +5907,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=back_keyboard()
         )
 
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "⛽ Ёқилғи ҳисоботи / Дизел олишни тасдиқлаш\n\n"
             "Тасдиқлашда турган маълумотлар:",
             reply_markup=diesel_pending_confirm_keyboard(driver_car)
         )
+        remember_inline_message(context, msg)
         return
 
     if text == "⛽ ДИЗЕЛ бериш":
