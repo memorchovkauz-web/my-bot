@@ -2758,39 +2758,32 @@ def diesel_pending_confirm_keyboard(driver_car):
         SELECT
             dt.id,
             dt.from_car,
-            dt.to_car,
             dt.firm,
             dt.created_at,
-            COALESCE(c.car_type, '')
+            COALESCE(dt.liter, '')
         FROM diesel_transfers dt
-        LEFT JOIN cars c ON LOWER(c.car_number) = LOWER(dt.from_car)
         WHERE LOWER(dt.to_car) = LOWER(%s)
           AND dt.status = 'Қабул қилувчи текширувида'
-        ORDER BY dt.firm ASC, dt.created_at DESC
+        ORDER BY dt.created_at DESC
     """, (driver_car,))
 
     rows = cursor.fetchall()
     keyboard = []
-    current_firm = None
 
-    for transfer_id, from_car, to_car, firm, created_at, car_type, liter in rows:
-        firm = firm or "Фирма номаълум"
-
-        if current_firm != firm:
-            keyboard.append([InlineKeyboardButton(f"🏢 {firm}", callback_data="none")])
-            current_firm = firm
-
-        date_text = created_at.strftime("%d.%m.%y") if created_at else ""
+    for transfer_id, from_car, firm, created_at, liter in rows:
+        from_car = from_car or "Кимдан номаълум"
+        date_text = created_at.strftime("%d.%m") if created_at else "--.--"
+        liter_text = format_liter(liter) if 'format_liter' in globals() else str(liter)
 
         keyboard.append([
             InlineKeyboardButton(
-                f"{from_car} | {liter} л | {firm} | {date_text}",
+                f"{date_text} / {from_car} / {liter_text} л",
                 callback_data=f"diesel_receive_detail|{transfer_id}"
             )
         ])
 
     if not keyboard:
-        keyboard = [[InlineKeyboardButton("❌ Тасдиқланмаган дизел маълумоти йўқ", callback_data="none")]]
+        keyboard = [[InlineKeyboardButton("❌ Тасдиқлашда турган дизел маълумоти йўқ", callback_data="none")]]
 
     return InlineKeyboardMarkup(keyboard)
 
@@ -3828,15 +3821,18 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
+    if to_driver_id is None:
+        print(f"DIESEL TRANSFER RECEIVER NOT FOUND: transfer_id={transfer_id}, to_car={to_car}")
+        return
+
+    sender_text = f"{from_car} — {from_driver_name}" if from_driver_name else str(from_car)
+
     message_text = (
-        "⛽ Сизга ДИЗЕЛ берилди\n\n"
-        f"🕒 Вақт: {created_text}\n"
-        f"🏢 Фирма: {firm}\n"
-        f"🚛 Дизел берган техника: {from_car} — {from_driver_name}\n"
-        f"🚛 Дизел олган техника: {to_car} — {to_driver_name}\n"
-        f"📝 Изоҳ: {note}\n"
-        f"⛽ Литр: {liter}\n\n"
-        "Маълумотни тасдиқлайсизми?"
+        "⛽ Сизга Дизел берилди\n\n"
+        f"Кимдан: {sender_text}\n"
+        f"Сана: {created_text}\n"
+        f"Литр: {liter} л\n\n"
+        "Ёқилғи ҳисоботи → Дизел олишни тасдиқлаш бўлимида тасдиқланг."
     )
 
     await context.bot.send_message(
@@ -4019,15 +4015,18 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
 
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
 
+    if to_driver_id is None:
+        print(f"DIESEL TRANSFER RECEIVER NOT FOUND: transfer_id={transfer_id}, to_car={to_car}")
+        return
+
+    sender_text = f"{from_car} — {from_driver_name}" if from_driver_name else str(from_car)
+
     message_text = (
-        "⛽ Сизга ДИЗЕЛ берилди\n\n"
-        f"🕒 Вақт: {created_text}\n"
-        f"🏢 Фирма: {firm}\n"
-        f"🚛 Дизел берган: {from_car} — {from_driver_name}\n"
-        f"🚛 Дизел олган: {to_car} — {to_driver_name}\n"
-        f"📝 Изоҳ: {note}\n"
-        f"⛽ Литр: {liter}\n\n"
-        "Маълумотни тасдиқлайсизми?"
+        "⛽ Сизга Дизел берилди\n\n"
+        f"Кимдан: {sender_text}\n"
+        f"Сана: {created_text}\n"
+        f"Литр: {liter} л\n\n"
+        "Ёқилғи ҳисоботи → Дизел олишни тасдиқлаш бўлимида тасдиқланг."
     )
 
     await context.bot.send_message(
@@ -5851,7 +5850,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await update.message.reply_text(
-            "✅ Тасдиқланмаган дизел маълумотлари:",
+            "⛽ Ёқилғи ҳисоботи / Дизел олишни тасдиқлаш\n\n"
+            "Тасдиқлашда турган маълумотлар:",
             reply_markup=diesel_pending_confirm_keyboard(driver_car)
         )
         return
@@ -10012,6 +10012,49 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # === DIESEL RECEIVER CONFIRM FLOW CALLBACKS START ===
+
+    if data.startswith("diesel_receive_detail|"):
+        transfer_id = data.split("|", 1)[1]
+
+        cursor.execute("""
+            SELECT from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at
+            FROM diesel_transfers
+            WHERE id = %s
+        """, (transfer_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+
+        from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at = row
+
+        if int(update.effective_user.id) != int(to_driver_id):
+            await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+            return
+
+        created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+        media_line = "👁 Кўриш тугмасини босинг — расм/видео очилади." if (speedometer_photo_id or video_id) else "Медиа файл йўқ."
+
+        text = (
+            "⛽ ДИЗЕЛ МАЪЛУМОТИ\n\n"
+            f"Кимдан: {from_car}\n"
+            f"Кимга: {to_car}\n"
+            f"Сана: {created_text}\n"
+            f"Фирма: {firm}\n"
+            f"Литр: {liter} л\n"
+            f"Изоҳ: {note or ''}\n"
+            f"Статус: Қабул қилувчи текширувида\n\n"
+            f"{media_line}\n\n"
+            "Маълумот тўғрими?"
+        )
+
+        await query.message.reply_text(
+            text,
+            reply_markup=diesel_receiver_keyboard(transfer_id)
+        )
+        return
 
     if data.startswith("diesel_receive_view|"):
         try:
