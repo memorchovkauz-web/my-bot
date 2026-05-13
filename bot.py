@@ -1003,6 +1003,114 @@ def get_staff_by_id(driver_id):
         return None
 
 
+
+def update_driver_status_in_google_sheet(telegram_id, status):
+    try:
+        rows = drivers_ws.get_all_values()
+        target = str(telegram_id)
+
+        for idx, row in enumerate(rows, start=1):
+            if not row:
+                continue
+
+            if str(row[0]).strip() == target:
+                # DRIVERS лист структураси: A telegram_id ... G status
+                drivers_ws.update_cell(idx, 7, status)
+                return True
+
+        return False
+
+    except Exception as e:
+        print("UPDATE DRIVER STATUS IN SHEET ERROR:", e)
+        return False
+
+
+def delete_driver_from_google_sheet(telegram_id):
+    try:
+        rows = drivers_ws.get_all_values()
+        target = str(telegram_id)
+
+        for idx, row in enumerate(rows, start=1):
+            if not row:
+                continue
+
+            if str(row[0]).strip() == target:
+                drivers_ws.delete_rows(idx)
+                return True
+
+        return False
+
+    except Exception as e:
+        print("DELETE DRIVER FROM SHEET ERROR:", e)
+        return False
+
+
+async def clear_blocked_user_bot_messages(context, telegram_id):
+    try:
+        # Бот юборган охирги маълум inline/хабарларни ўчиришга ҳаракат қилади.
+        for key in [
+            "all_inline_message_ids",
+            "bot_message_ids",
+            "technadzor_staff_message_id",
+            "technadzor_staff_inline_message_id",
+            "registration_message_id",
+            "confirm_message_id",
+        ]:
+            value = context.user_data.get(key)
+
+            if isinstance(value, list):
+                for message_id in value:
+                    try:
+                        await context.bot.delete_message(chat_id=int(telegram_id), message_id=int(message_id))
+                    except Exception:
+                        try:
+                            await context.bot.edit_message_reply_markup(
+                                chat_id=int(telegram_id),
+                                message_id=int(message_id),
+                                reply_markup=None
+                            )
+                        except Exception:
+                            pass
+
+            elif value:
+                try:
+                    await context.bot.delete_message(chat_id=int(telegram_id), message_id=int(value))
+                except Exception:
+                    try:
+                        await context.bot.edit_message_reply_markup(
+                            chat_id=int(telegram_id),
+                            message_id=int(value),
+                            reply_markup=None
+                        )
+                    except Exception:
+                        pass
+
+    except Exception as e:
+        print("CLEAR BLOCKED USER BOT MESSAGES ERROR:", e)
+
+
+async def notify_staff_blocked(context, telegram_id):
+    try:
+        await context.bot.send_message(
+            chat_id=int(telegram_id),
+            text="⛔ Сиз блокландингиз. Ботдан фойдаланиш вақтинча тўхтатилди.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    except Exception as e:
+        print("NOTIFY STAFF BLOCKED ERROR:", e)
+
+
+async def notify_staff_play(context, telegram_id):
+    try:
+        await context.bot.send_message(
+            chat_id=int(telegram_id),
+            text="✅ Сизга ботдан фойдаланиш рухсати берилди. /start босинг.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    except Exception as e:
+        print("NOTIFY STAFF PLAY ERROR:", e)
+
+
 def staff_list_button_text(row):
     driver_id, name, surname, firm, car, status, work_role = row
     short_name = staff_short_name(name, surname)
@@ -1153,6 +1261,7 @@ def technadzor_staff_card_keyboard(driver_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"tz_staff_edit|{driver_id}")],
         [InlineKeyboardButton(toggle_text, callback_data=f"tz_staff_status|{driver_id}|{toggle_to}")],
+        [InlineKeyboardButton("🗑 Delete", callback_data=f"tz_staff_delete|{driver_id}")],
     ])
 
 
@@ -4362,6 +4471,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
+    # === V70: BLOCK қилинган ходим ботдан фойдалана олмайди ===
+    if get_user(update) is None:
+        current_status = get_driver_status(update.effective_user.id)
+
+        if current_status == "Рад этилди":
+            context.user_data.clear()
+            await update.message.reply_text(
+                "⛔ Сиз блоклангансиз. Администратор PLAY қилмагунча ботдан фойдалана олмайсиз.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+
     # === V69: Регистрация/ходим таҳририда фирма танлаш юқори приоритет ===
     # Фирма номи умумий меню handler'ига тушиб кетмаслиги учун бу блок юқорида туради.
     if mode in ["driver_firm", "driver_edit_firm", "driver_edit_firm_mechanic"]:
@@ -6904,6 +7025,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     query = update.callback_query
+    # === V70: BLOCK қилинган ходим inline callback ҳам ишлата олмайди ===
+    if get_user(update) is None:
+        current_status = get_driver_status(update.effective_user.id)
+        if current_status == "Рад этилди":
+            context.user_data.clear()
+            try:
+                await query.answer("⛔ Сиз блоклангансиз.", show_alert=True)
+            except Exception:
+                pass
+            try:
+                await query.message.reply_text(
+                    "⛔ Сиз блоклангансиз. Администратор PLAY қилмагунча ботдан фойдалана олмайсиз.",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+            except Exception:
+                pass
+            return
+
     await query.answer()
     data = query.data
 
@@ -7911,6 +8050,51 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("🚛 Янги техникани танланг:", reply_markup=technadzor_staff_cars_reply_keyboard(firm))
             return
 
+    if data.startswith("tz_staff_delete|"):
+        driver_id = data.split("|", 1)[1]
+        staff = get_staff_by_id(driver_id)
+
+        if not staff:
+            await query.answer("Ходим топилмади.", show_alert=True)
+            return
+
+        telegram_id = staff.get("telegram_id")
+        staff_type = get_staff_type_from_work_role(staff.get("work_role"))
+        firm = staff.get("firm") if staff_type == "drivers" else None
+
+        try:
+            cursor.execute("DELETE FROM drivers WHERE id = %s", (int(driver_id),))
+            conn.commit()
+            delete_driver_from_google_sheet(telegram_id)
+        except Exception as e:
+            print("TECHNADZOR STAFF DELETE ERROR:", e)
+            await query.answer("❌ Ўчиришда хато.", show_alert=True)
+            return
+
+        try:
+            await clear_blocked_user_bot_messages(context, telegram_id)
+        except Exception:
+            pass
+
+        try:
+            await context.bot.send_message(
+                chat_id=int(telegram_id),
+                text="🗑 Сизнинг маълумотларингиз тизимдан ўчирилди.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        except Exception:
+            pass
+
+        context.user_data["technadzor_staff_type"] = staff_type
+        context.user_data["technadzor_staff_firm"] = firm
+
+        await query.edit_message_text(
+            "🗑 Ходим PostgreSQL ва Google Sheetsдан ўчирилди.\n\n"
+            + technadzor_staff_list_text(staff_type, firm),
+            reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
+        )
+        return
+
     if data.startswith("tz_staff_status|"):
         parts = data.split("|", 2)
         if len(parts) != 3:
@@ -7920,13 +8104,31 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         driver_id = parts[1]
         new_label = parts[2]
         new_status = staff_status_db(new_label)
+        staff = get_staff_by_id(driver_id)
+
+        if not staff:
+            await query.answer("Ходим топилмади.", show_alert=True)
+            return
+
+        telegram_id = staff.get("telegram_id")
+
         try:
             cursor.execute("UPDATE drivers SET status = %s WHERE id = %s", (new_status, int(driver_id)))
             conn.commit()
+            update_driver_status_in_google_sheet(telegram_id, new_status)
         except Exception as e:
             print("TECHNADZOR STAFF STATUS UPDATE ERROR:", e)
             await query.answer("❌ Сақлашда хато.", show_alert=True)
             return
+
+        if new_status == "Рад этилди":
+            try:
+                await clear_blocked_user_bot_messages(context, telegram_id)
+            except Exception:
+                pass
+            await notify_staff_blocked(context, telegram_id)
+        elif new_status == "Тасдиқланди":
+            await notify_staff_play(context, telegram_id)
 
         await query.edit_message_text(
             technadzor_staff_card_text(driver_id),
