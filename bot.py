@@ -7,7 +7,7 @@ import asyncio
 import psycopg2
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -106,7 +106,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def run_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), Handler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    # ThreadingHTTPServer: Telegram webhook + UptimeRobot health checks бир-бирини кутиб қолмасин.
     print(f"KEEP ALIVE SERVER STARTED ON PORT {port}")
     server.serve_forever()
 
@@ -131,7 +132,7 @@ except Exception as e:
 # =====================
 # Қисқа TTL cache: менюларда такрорий SELECT'ларни камайтиради.
 # DB структураси ва callback flow ўзгармайди.
-CACHE_TTL_SECONDS = 10
+CACHE_TTL_SECONDS = 30
 _speed_cache = {}
 
 def cache_get(key):
@@ -637,33 +638,41 @@ def get_role(update):
         return user["role"]
 
     try:
+        user_id = int(update.effective_user.id)
+        cache_key = f"driver:role:{user_id}"
+        cached = cache_get(cache_key)
+        if cached is not None:
+            return cached or None
+
         cursor.execute("""
             SELECT work_role, status
             FROM drivers
             WHERE telegram_id = %s
             LIMIT 1
-        """, (int(update.effective_user.id),))
-
+        """, (user_id,))
         row = cursor.fetchone()
 
         if not row:
-            return None
+            return cache_set(cache_key, "") or None
 
         work_role = row[0] or "driver"
         status = (row[1] or "").strip()
 
         if status != "Тасдиқланди":
-            return None
+            return cache_set(cache_key, "") or None
 
-        if work_role in ["mechanic", "zapravshik"]:
-            return work_role
+        if work_role in ["driver", "mechanic", "zapravshik"]:
+            return cache_set(cache_key, work_role)
 
-        return None
+        return cache_set(cache_key, "") or None
 
     except Exception as e:
         print("GET ROLE FROM DB ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return None
-
 
 def get_user_name(update):
     user = get_user(update)
@@ -1092,33 +1101,38 @@ def remember_inline_message_for_chat(context, chat_id, msg):
 
 async def clear_all_inline_messages(context, chat_id):
     try:
-        ids = list(context.user_data.get("all_inline_message_ids", []))
+        ids = []
+        ids.extend(list(context.user_data.get("all_inline_message_ids", []))[-5:])
 
         bot_data_key = f"all_inline_message_ids:{int(chat_id)}"
-        for value in list(context.bot_data.get(bot_data_key, [])):
-            if value and value not in ids:
-                ids.append(value)
+        ids.extend(list(context.bot_data.get(bot_data_key, []))[-5:])
 
         for key in ["technadzor_staff_message_id", "technadzor_staff_inline_message_id"]:
             value = context.user_data.get(key)
-            if value and value not in ids:
+            if value:
                 ids.append(value)
 
-        for msg_id in ids:
+        clean_ids = []
+        for value in ids:
+            try:
+                msg_id = int(value)
+                if msg_id not in clean_ids:
+                    clean_ids.append(msg_id)
+            except Exception:
+                pass
+
+        for msg_id in clean_ids[-8:]:
             try:
                 await context.bot.edit_message_reply_markup(
                     chat_id=chat_id,
-                    message_id=int(msg_id),
+                    message_id=msg_id,
                     reply_markup=None
                 )
             except Exception:
                 pass
 
         context.user_data["all_inline_message_ids"] = []
-        try:
-            context.bot_data[f"all_inline_message_ids:{int(chat_id)}"] = []
-        except Exception:
-            pass
+        context.bot_data[bot_data_key] = []
     except Exception as e:
         print("CLEAR ALL INLINE MESSAGES ERROR:", e)
 
@@ -1887,9 +1901,17 @@ def format_liter(value):
         return "0"
 
 
-def get_diesel_prihod_sum_by_firm(firm):
-    total = 0.0
+def get_all_diesel_stock_by_firm_cached():
+    cache_key = "diesel:stock_by_firm:all"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    data = {firm: {"prihod": 0.0, "rashod": 0.0} for firm in FIRM_NAMES}
+
     try:
+        firm_map = {firm.strip().lower(): firm for firm in FIRM_NAMES}
+
         cursor.execute("""
             SELECT liter, note
             FROM diesel_prihod
@@ -1897,17 +1919,12 @@ def get_diesel_prihod_sum_by_firm(firm):
         """)
         for liter, note in cursor.fetchall():
             firm_text, _, _ = parse_diesel_prihod_note(note or "")
-            if firm_text.strip().lower() == firm.strip().lower():
-                total += to_float_liter(liter)
-    except Exception as e:
-        print("GET DIESEL PRIHOD SUM ERROR:", e)
-    return total
+            firm = firm_map.get((firm_text or "").strip().lower())
+            if firm:
+                data[firm]["prihod"] += to_float_liter(liter)
 
-
-def get_diesel_rashod_sum_by_firm(firm):
-    try:
         cursor.execute("""
-            SELECT COALESCE(SUM(
+            SELECT COALESCE(firm, ''), COALESCE(SUM(
                 CASE
                     WHEN liter ~ '^[0-9]+([.][0-9]+)?$'
                     THEN liter::numeric
@@ -1915,23 +1932,46 @@ def get_diesel_rashod_sum_by_firm(firm):
                 END
             ), 0)
             FROM diesel_transfers
-            WHERE LOWER(COALESCE(firm, '')) = LOWER(%s)
-              AND TRIM(COALESCE(status, '')) IN ('Тасдиқланди', 'Берилди')
-        """, (firm,))
-        row = cursor.fetchone()
-        return float(row[0] or 0)
+            WHERE TRIM(COALESCE(status, '')) IN ('Тасдиқланди', 'Берилди')
+            GROUP BY COALESCE(firm, '')
+        """)
+        for firm_text, total in cursor.fetchall():
+            firm = firm_map.get((firm_text or "").strip().lower())
+            if firm:
+                data[firm]["rashod"] = float(total or 0)
     except Exception as e:
-        print("GET DIESEL RASHOD SUM ERROR:", e)
-        return 0.0
+        print("GET ALL DIESEL STOCK ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
+    return cache_set(cache_key, data)
+
+
+def clear_diesel_stock_cache():
+    clear_speed_cache("diesel:stock_by_firm:")
+    clear_speed_cache("zapravka:info_text")
+
+
+def get_diesel_prihod_sum_by_firm(firm):
+    data = get_all_diesel_stock_by_firm_cached()
+    return float(data.get(firm, {}).get("prihod", 0) or 0)
+
+
+def get_diesel_rashod_sum_by_firm(firm):
+    data = get_all_diesel_stock_by_firm_cached()
+    return float(data.get(firm, {}).get("rashod", 0) or 0)
 
 
 def get_total_company_diesel_stock():
     total = 0.0
     try:
+        data = get_all_diesel_stock_by_firm_cached()
         for firm in FIRM_NAMES:
-            _, _, stock = get_diesel_stock_by_firm(firm)
-            total += float(stock or 0)
+            prihod = float(data.get(firm, {}).get("prihod", 0) or 0)
+            rashod = float(data.get(firm, {}).get("rashod", 0) or 0)
+            total += prihod - rashod
     except Exception as e:
         print("TOTAL COMPANY DIESEL STOCK ERROR:", e)
     return total
@@ -1948,10 +1988,11 @@ def is_zapravshik_diesel_expense_flow(context):
 
 
 def get_diesel_stock_by_firm(firm):
-    prihod = get_diesel_prihod_sum_by_firm(firm)
-    rashod = get_diesel_rashod_sum_by_firm(firm)
+    data = get_all_diesel_stock_by_firm_cached()
+    item = data.get(firm, {})
+    prihod = float(item.get("prihod", 0) or 0)
+    rashod = float(item.get("rashod", 0) or 0)
     return prihod, rashod, prihod - rashod
-
 
 def diesel_prihod_firm_stock_keyboard():
     # Заправшик дизел менюсида фирмалар олдида остатка кўринади.
@@ -1998,17 +2039,25 @@ def get_other_diesel_expense_total():
 
 
 def zapravka_info_text():
-    lines = ["⛽ ЗАПРАВКА МАЬЛУМОТИ", ""]
+    cache_key = "zapravka:info_text"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
 
+    lines = ["⛽ ЗАПРАВКА МАЬЛУМОТИ", ""]
     total_prihod = 0.0
     total_rashod = 0.0
     total_ostatka = 0.0
+    stock_data = get_all_diesel_stock_by_firm_cached()
 
     for firm in FIRM_NAMES:
-        prihod, rashod, ostatka = get_diesel_stock_by_firm(firm)
-        total_prihod += float(prihod or 0)
-        total_rashod += float(rashod or 0)
-        total_ostatka += float(ostatka or 0)
+        item = stock_data.get(firm, {})
+        prihod = float(item.get("prihod", 0) or 0)
+        rashod = float(item.get("rashod", 0) or 0)
+        ostatka = prihod - rashod
+        total_prihod += prihod
+        total_rashod += rashod
+        total_ostatka += ostatka
 
         lines.append(firm)
         lines.append(
@@ -2031,9 +2080,7 @@ def zapravka_info_text():
         f"Расход: {format_liter(total_rashod)}л / "
         f"Остатка: {format_liter(total_ostatka)}л"
     )
-
-    return "\n".join(lines).strip()
-
+    return cache_set(cache_key, "\n".join(lines).strip())
 
 def register_role_keyboard():
     return ReplyKeyboardMarkup([
@@ -5031,9 +5078,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
+    current_role = get_role(update)
 
     # === V77: Заправшик ва дизел ҳайдовчи меню алмашганда юқоридаги inline кнопкалар ўчсин ===
-    if get_role(update) in ["zapravshik", "driver"] and text in [
+    if current_role in ["zapravshik", "driver"] and text in [
         "⛽ Ёқилғи ҳисоботи",
         "✅ ДИЗЕЛ олишни тасдиқлаш",
         "⛽ ДИЗЕЛ бериш",
@@ -5050,7 +5098,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await clear_all_inline_messages(context, update.effective_chat.id)
 
     # === V76: Заправшик уведомления карточкасидан Орқага -> рўйхат ===
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode in [
+    if text == "⬅️ Орқага" and current_role == "zapravshik" and mode in [
         "zapravshik_notif_prihod_return_card",
         "zapravshik_notif_diesel_rejected_card",
         "zapravshik_notif_prihod_pending_card",
@@ -5141,7 +5189,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # === V68: Заправшик дизел уведомлениясида Орқага ===
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode in [
+    if text == "⬅️ Орқага" and current_role == "zapravshik" and mode in [
         "zapravshik_diesel_notifications_rejected",
         "zapravshik_diesel_notifications_pending",
     ]:
@@ -5153,14 +5201,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode == "zapravshik_diesel_notifications":
+    if text == "⬅️ Орқага" and current_role == "zapravshik" and mode == "zapravshik_diesel_notifications":
         await clear_all_inline_messages(context, update.effective_chat.id)
         context.user_data["mode"] = "zapravshik_diesel_menu"
         await update.message.reply_text("🟡 Дизел бўлими", reply_markup=zapravshik_diesel_menu_keyboard())
         return
 
 
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode == "zapravshik_diesel_menu":
+    if text == "⬅️ Орқага" and current_role == "zapravshik" and mode == "zapravshik_diesel_menu":
         context.user_data.clear()
         context.user_data["mode"] = "zapravshik_main"
         await update.message.reply_text(zapravka_info_text(), reply_markup=zapravshik_main_keyboard())
@@ -5168,7 +5216,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     # === V67: Заправшик дизел расходида Орқага фақат 1 қадам ===
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode in [
+    if text == "⬅️ Орқага" and current_role == "zapravshik" and mode in [
         "dieselgive_firm",
         "dieselgive_car",
         "dieselgive_edit_car",
@@ -5178,7 +5226,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🟡 Дизел бўлими", reply_markup=zapravshik_diesel_menu_keyboard())
         return
 
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode == "dieselgive_liter":
+    if text == "⬅️ Орқага" and current_role == "zapravshik" and mode == "dieselgive_liter":
         context.user_data["mode"] = "dieselgive_car"
         firm_name = context.user_data.get("dieselgive_firm")
         await update.message.reply_text(
@@ -5190,7 +5238,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode == "dieselgive_note":
+    if text == "⬅️ Орқага" and current_role == "zapravshik" and mode == "dieselgive_note":
         context.user_data["mode"] = "dieselgive_liter"
         await update.message.reply_text(
             "⛽ Неччи литр дизел беряпсиз?\n\nФақат сон киритинг.",
@@ -5198,7 +5246,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode == "dieselgive_speed_photo":
+    if text == "⬅️ Орқага" and current_role == "zapravshik" and mode == "dieselgive_speed_photo":
         context.user_data["mode"] = "dieselgive_note"
         await update.message.reply_text(
             "📝 Изоҳ киритинг.",
@@ -5206,7 +5254,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode in [
+    if text == "⬅️ Орқага" and current_role == "zapravshik" and mode in [
         "dieselgive_confirm",
         "dieselgive_edit_menu",
     ]:
@@ -5218,7 +5266,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-    if text == "⬅️ Орқага" and get_role(update) == "technadzor":
+    if text == "⬅️ Орқага" and current_role == "technadzor":
         await clear_all_inline_messages(context, update.effective_chat.id)
 
     if text == "⬅️ Орқага" and mode in [
@@ -5250,7 +5298,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         remember_inline_message(context, msg)
         return
 
-    if text == "⬅️ Орқага" and get_role(update) == "technadzor" and mode == "technadzor_diesel_prihod_card":
+    if text == "⬅️ Орқага" and current_role == "technadzor" and mode == "technadzor_diesel_prihod_card":
         diesel_prihod_clear_staged(context)
         context.user_data["mode"] = "technadzor_diesel_prihod_list"
         msg = await update.message.reply_text(
@@ -5262,7 +5310,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # === PRIORITY: Текширувчи регистрация таҳриридан орқага ===
     # Эски ходимлар/фирма flow'га тушиб кетмаслиги учун энг юқорида ушлаймиз.
-    if get_role(update) == "technadzor" and text == "⬅️ Орқага" and mode in [
+    if current_role == "technadzor" and text == "⬅️ Орқага" and mode in [
         "technadzor_staff_edit_name",
         "technadzor_staff_edit_surname",
         "technadzor_staff_edit_phone",
@@ -5299,7 +5347,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # === Заправщик: дизел приход text flow ===
-    if get_role(update) == "zapravshik":
+    if current_role == "zapravshik":
         if text == "⬅️ Орқага" and mode == "zapravshik_diesel_menu":
             context.user_data.clear()
             await update.message.reply_text(zapravka_info_text(), reply_markup=zapravshik_main_keyboard())
@@ -5625,7 +5673,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # === PRIORITY: Регистрация тасдиқ/раддан кейин пастки Орқага ===
     # Бу блок барча умумий back handler'лардан олдин ишлайди.
-    if text == "⬅️ Орқага" and mode == "technadzor_registration_after_decision" and get_role(update) == "technadzor":
+    if text == "⬅️ Орқага" and mode == "technadzor_registration_after_decision" and current_role == "technadzor":
         await clear_technadzor_staff_inline(context, update.effective_chat.id)
 
         context.user_data.pop("operation", None)
@@ -5659,7 +5707,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # === Текширувчи янги меню структураси ===
-    if get_role(update) == "technadzor":
+    if current_role == "technadzor":
         if text == "⬅️ Орқага" and mode in [
             "technadzor_notifications_menu",
             "select_firm_for_add",
@@ -6552,7 +6600,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_driver_confirm(update.message, context)
         return
 
-    role = get_role(update)
+    role = current_role
 
     if role not in ["director", "mechanic", "technadzor", "slesar", "zapravshik"] and not str(context.user_data.get("mode", "")).startswith("driver"):
         driver_status = get_driver_status(update.effective_user.id)
@@ -6571,6 +6619,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
     mode = context.user_data.get("mode")
+    current_role = current_role
 
     if mode == "driver_name":
         if not is_valid_name(text):
