@@ -42,6 +42,7 @@ try:
     conn.commit()
 except Exception as e:
     print("DB TIMEZONE SET ERROR:", e)
+    conn.rollback()
 
 
 cursor.execute("""
@@ -124,6 +125,7 @@ try:
     conn.commit()
 except Exception as e:
     print("DIESEL TRANSFERS ADD speedometer_photo_id ERROR:", e)
+    conn.rollback()
 
 
 cursor.execute("""
