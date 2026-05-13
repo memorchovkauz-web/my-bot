@@ -4904,8 +4904,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["mode"] = "choose_work_role"
             return
             
-    if role not in ["director", "mechanic", "technadzor", "slesar", "zapravshik"]:
+    # V16: Ҳайдовчи тасдиқланган бўлса, уни директор блокига туширмаслик керак.
+    # Структура сақланади: фақат driver role учун ўз менюси очилади.
+    if role not in ["director", "mechanic", "technadzor", "slesar", "zapravshik", "driver"]:
         await deny(update)
+        return
+
+    if role == "driver":
+        driver_car = get_driver_car(update.effective_user.id)
+        fuel_type = get_car_fuel_type(driver_car)
+        await update.message.reply_text(
+            f"🚚 Ҳайдовчи менюси\n\n"
+            f"🚛 Техника: {driver_car}\n"
+            f"⛽ Ёқилғи тури: {fuel_type}",
+            reply_markup=driver_main_keyboard(fuel_type)
+        )
         return
 
     if role == "technadzor":
@@ -7033,6 +7046,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if role == "slesar":
             await update.message.reply_text("🛠 Слесарь менюси\n\nАввал фирмани танланг:", reply_markup=firm_keyboard())
+            return
+
+        # V16: Ҳайдовчи Орқага/Отмен/режимдан чиққанда директор менюсига тушмасин.
+        if role == "driver":
+            driver_car = get_driver_car(update.effective_user.id)
+            fuel_type = get_car_fuel_type(driver_car)
+            await update.message.reply_text(
+                f"🚚 Ҳайдовчи менюси\n\n"
+                f"🚛 Техника: {driver_car}\n"
+                f"⛽ Ёқилғи тури: {fuel_type}",
+                reply_markup=driver_main_keyboard(fuel_type)
+            )
             return
 
         await update.message.reply_text("👨‍💼 Директор менюси\n\nАввал фирмани танланг:", reply_markup=firm_keyboard())
