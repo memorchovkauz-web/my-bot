@@ -2763,7 +2763,7 @@ def diesel_pending_confirm_keyboard(driver_car):
             COALESCE(dt.liter, '')
         FROM diesel_transfers dt
         WHERE LOWER(dt.to_car) = LOWER(%s)
-          AND dt.status = 'Қабул қилувчи текширувида'
+          AND dt.status IN ('Қабул қилувчида', 'Қабул қилувчи текширувида')
         ORDER BY dt.created_at DESC
     """, (driver_car,))
 
@@ -2892,6 +2892,16 @@ def is_valid_diesel_liter(text):
     return text.isdigit() and 1 <= int(text) <= 9999
 
 
+def diesel_status_display(status):
+    if status in ("Қабул қилувчи текширувида", "Қабул қилувчида"):
+        return "Қабул қилувчида"
+    if status in ("Тасдиқланди", "Қабул қилинди", "Автоматик тасдиқланди"):
+        return "Қабул қилинди"
+    if status == "Рад этилди":
+        return "Рад этилди"
+    return status or "Номаълум"
+
+
 def diesel_confirm_text(context):
     created_time = context.user_data.get("dieselgive_created_time") or now_text()
     context.user_data["dieselgive_created_time"] = created_time
@@ -2908,6 +2918,7 @@ def diesel_confirm_text(context):
         f"🕒 Вақт: {shown_time}\n"
         f"⛽ Литр: {context.user_data.get('dieselgive_liter')}\n"
         f"📝 Изоҳ: {context.user_data.get('dieselgive_note')}\n"
+        "📌 Статус: Юборишга тайёр\n"
         "📸 Спидометр/моточас расми: сақланди ✅\n"
         "🎥 Видео: сақланди ✅\n\n"
         "Маълумот тўғрими?"
@@ -3791,7 +3802,6 @@ def diesel_rejected_receiver_keyboard(transfer_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👁 Кўриш", callback_data=f"diesel_receiver_rejected_view|{transfer_id}")],
         [InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_receiver_rejected_accept|{transfer_id}")],
-        [InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_receiver_rejected_edit|{transfer_id}")],
         [InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_receiver_rejected_cancel|{transfer_id}")]
     ])
 
@@ -3831,7 +3841,8 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
         "⛽ Сизга Дизел берилди\n\n"
         f"Кимдан: {sender_text}\n"
         f"Сана: {created_text}\n"
-        f"Литр: {liter} л\n\n"
+        f"Литр: {liter} л\n"
+        "Статус: Қабул қилувчида\n\n"
         "Ёқилғи ҳисоботи → Дизел олишни тасдиқлаш бўлимида тасдиқланг."
     )
 
@@ -3861,7 +3872,8 @@ async def notify_diesel_sender_confirmed(context, transfer_id):
             "✅ Дизел бериш маълумотингиз тасдиқланди.\n\n"
             f"🚛 Берган техника: {from_car}\n"
             f"🚛 Олган техника: {to_car}\n"
-            f"⛽ Литр: {liter}"
+            f"⛽ Литр: {liter}\n"
+            "📌 Статус: Қабул қилинди"
         )
     )
 
@@ -3899,7 +3911,8 @@ async def notify_diesel_sender_rejected(context, transfer_id, reason):
             f"🚛 Дизел олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n\n"
-            f"❗ Рад сабаби: {reason}\n\n"
+            f"❗ Рад сабаби: {reason}\n"
+            "📌 Статус: Рад этилди\n\n"
             "Маълумотни нима қиласиз?"
         ),
         reply_markup=diesel_rejected_sender_keyboard(transfer_id)
@@ -3985,10 +3998,7 @@ def diesel_rejected_after_view_keyboard(transfer_id):
 def diesel_rejected_receiver_keyboard(transfer_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👁 Кўриш", callback_data=f"diesel_receiver_rejected_view|{transfer_id}")],
-        [
-            InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_receiver_rejected_accept|{transfer_id}"),
-            InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_receiver_rejected_edit|{transfer_id}")
-        ],
+        [InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_receiver_rejected_accept|{transfer_id}")],
         [InlineKeyboardButton("❌ Отмен қилиш", callback_data=f"diesel_receiver_rejected_cancel|{transfer_id}")]
     ])
 
@@ -4025,7 +4035,8 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
         "⛽ Сизга Дизел берилди\n\n"
         f"Кимдан: {sender_text}\n"
         f"Сана: {created_text}\n"
-        f"Литр: {liter} л\n\n"
+        f"Литр: {liter} л\n"
+        "Статус: Қабул қилувчида\n\n"
         "Ёқилғи ҳисоботи → Дизел олишни тасдиқлаш бўлимида тасдиқланг."
     )
 
@@ -4056,7 +4067,8 @@ async def notify_diesel_sender_confirmed(context, transfer_id):
             "✅ Дизел бериш маълумотингиз тасдиқланди.\n\\n"
             f"🚛 Берган техника: {from_car}\n"
             f"🚛 Олган техника: {to_car}\n"
-            f"⛽ Литр: {liter}"
+            f"⛽ Литр: {liter}\n"
+            "📌 Статус: Қабул қилинди"
         )
     )
 
@@ -4094,7 +4106,8 @@ async def notify_diesel_sender_rejected(context, transfer_id, reason):
             f"🚛 Дизел олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n\n"
-            f"❗ Рад сабаби: {reason}\n\n"
+            f"❗ Рад сабаби: {reason}\n"
+            "📌 Статус: Рад этилди\n\n"
             "Маълумотни нима қиласиз?"
         ),
         reply_markup=diesel_rejected_sender_keyboard(transfer_id)
@@ -9099,7 +9112,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             SET status = %s, answered_at = NOW()
             WHERE id = %s
             RETURNING from_driver_id
-        """, ("Тасдиқланди", transfer_id))
+        """, ("Қабул қилинди", transfer_id))
 
         row = cursor.fetchone()
         conn.commit()
@@ -9901,11 +9914,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             receiver = get_driver_by_car(to_car)
 
-            if not receiver:
-                await query.message.reply_text("❌ Дизел оладиган техника ҳайдовчиси топилмади.")
-                return
-
-            to_driver_id = receiver[0]
+            if receiver:
+                to_driver_id = receiver[0]
+                resend_status = "Қабул қилувчида"
+                resend_auto_approved = False
+            else:
+                to_driver_id = None
+                resend_status = "Қабул қилинди"
+                resend_auto_approved = True
 
             cursor.execute("""
                 UPDATE diesel_transfers
@@ -9919,7 +9935,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     video_id = %s,
                     status = %s,
                     receiver_comment = NULL,
-                    answered_at = NULL
+                    answered_at = CASE WHEN %s THEN NOW() ELSE NULL END
                 WHERE id = %s
             """, (
                 from_car,
@@ -9930,21 +9946,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 note,
                 speedometer_photo_id,
                 video_id,
-                "Қабул қилувчи текширувида",
+                resend_status,
+                resend_auto_approved,
                 rejected_transfer_id
             ))
 
             conn.commit()
 
-            try:
-                await send_diesel_transfer_to_receiver(context, rejected_transfer_id)
-            except Exception as e:
-                print("REJECTED DIESEL RESEND ERROR:", e)
+            if resend_auto_approved:
+                await query.message.reply_text(
+                    "✅ Таҳрирланган дизел маълумоти автоматик қабул қилинди.\n"
+                    "Сабаб: ушбу техникага ҳайдовчи бириктирилмаган.",
+                    reply_markup=diesel_report_keyboard()
+                )
+            else:
+                try:
+                    await send_diesel_transfer_to_receiver(context, rejected_transfer_id)
+                except Exception as e:
+                    print("REJECTED DIESEL RESEND ERROR:", e)
 
-            await query.message.reply_text(
-                "✅ Таҳрирланган дизел маълумоти қайта олувчи ҳайдовчига юборилди.",
-                reply_markup=diesel_report_keyboard()
-            )
+                await query.message.reply_text(
+                    "✅ Таҳрирланган дизел маълумоти қайта олувчи ҳайдовчига юборилди.",
+                    reply_markup=diesel_report_keyboard()
+                )
 
             context.user_data.clear()
             context.user_data["mode"] = "diesel_menu"
@@ -9954,11 +9978,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if receiver:
             to_driver_id = receiver[0]
-            transfer_status = "Қабул қилувчи текширувида"
+            transfer_status = "Қабул қилувчида"
             auto_approved = False
         else:
             to_driver_id = None
-            transfer_status = "Тасдиқланди"
+            transfer_status = "Қабул қилинди"
             auto_approved = True
 
         cursor.execute("""
@@ -10017,7 +10041,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         transfer_id = data.split("|", 1)[1]
 
         cursor.execute("""
-            SELECT from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at
+            SELECT from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at, status
             FROM diesel_transfers
             WHERE id = %s
         """, (transfer_id,))
@@ -10028,7 +10052,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ Маълумот топилмади.")
             return
 
-        from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at = row
+        from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at, status = row
 
         if int(update.effective_user.id) != int(to_driver_id):
             await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
@@ -10045,7 +10069,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Фирма: {firm}\n"
             f"Литр: {liter} л\n"
             f"Изоҳ: {note or ''}\n"
-            f"Статус: Қабул қилувчи текширувида\n\n"
+            f"Статус: {diesel_status_display(status)}\n\n"
             f"{media_line}\n\n"
             "Маълумот тўғрими?"
         )
@@ -10068,7 +10092,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         transfer_id = data.split("|", 1)[1]
 
         cursor.execute("""
-            SELECT from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at
+            SELECT from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at, status
             FROM diesel_transfers
             WHERE id = %s
         """, (transfer_id,))
@@ -10079,7 +10103,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ Маълумот топилмади.")
             return
 
-        from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at = row
+        from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at, status = row
 
         if int(update.effective_user.id) != int(to_driver_id):
             await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
@@ -10095,7 +10119,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🚛 Дизел олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             f"📝 Изоҳ: {note}\n"
-            f"📌 Статус: Қабул қилувчи текширувида\n\n"
+            f"📌 Статус: {diesel_status_display(status)}\n\n"
             "Маълумот тўғрими?"
         )
 
@@ -10156,7 +10180,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             SET status = %s,
                 answered_at = NOW()
             WHERE id = %s
-        """, ("Тасдиқланди", transfer_id))
+        """, ("Қабул қилинди", transfer_id))
 
         conn.commit()
 
