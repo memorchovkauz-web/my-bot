@@ -7,7 +7,8 @@ import asyncio
 import psycopg2
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -106,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def run_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), Handler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"KEEP ALIVE SERVER STARTED ON PORT {port}")
     server.serve_forever()
 
@@ -131,8 +132,23 @@ except Exception as e:
 # =====================
 # Қисқа TTL cache: менюларда такрорий SELECT'ларни камайтиради.
 # DB структураси ва callback flow ўзгармайди.
-CACHE_TTL_SECONDS = 10
+CACHE_TTL_SECONDS = 60
 _speed_cache = {}
+SHEET_EXECUTOR = ThreadPoolExecutor(max_workers=2)
+
+def run_sheet_background(action_name, func):
+    # Google Sheets операциялари секин; улар Telegram жавобини кутиб қолдирмаслиги учун background thread'да кетади.
+    def _runner():
+        try:
+            return func()
+        except Exception as e:
+            print(f"[SHEET BACKGROUND ERROR] {action_name}:", e)
+            return None
+    try:
+        SHEET_EXECUTOR.submit(_runner)
+    except Exception as e:
+        print(f"[SHEET EXECUTOR SUBMIT ERROR] {action_name}:", e)
+
 
 def cache_get(key):
     try:
@@ -287,6 +303,52 @@ CREATE TABLE IF NOT EXISTS diesel_other_expense (
 
 
 conn.commit()
+
+# =====================
+# DB SPEED INDEXES v12
+# =====================
+# Кўп ишлатиладиган WHERE/ORDER BY сўровлар учун index.
+# IF NOT EXISTS ва қисқа lock_timeout структурани бузмайди, DB lock бўлса ботни yiqитмайди.
+def ensure_speed_indexes():
+    index_sql_list = [
+        "CREATE INDEX IF NOT EXISTS idx_drivers_telegram_id ON drivers (telegram_id)",
+        "CREATE INDEX IF NOT EXISTS idx_drivers_car_lower ON drivers (LOWER(car))",
+        "CREATE INDEX IF NOT EXISTS idx_drivers_role_status ON drivers (work_role, status)",
+        "CREATE INDEX IF NOT EXISTS idx_cars_firm ON cars (firm)",
+        "CREATE INDEX IF NOT EXISTS idx_cars_number_lower ON cars (LOWER(car_number))",
+        "CREATE INDEX IF NOT EXISTS idx_cars_status_firm ON cars (status, firm)",
+        "CREATE INDEX IF NOT EXISTS idx_diesel_transfers_to_status ON diesel_transfers (to_car, status)",
+        "CREATE INDEX IF NOT EXISTS idx_diesel_transfers_to_driver_status ON diesel_transfers (to_driver_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_diesel_transfers_status_created ON diesel_transfers (status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_diesel_transfers_from_driver ON diesel_transfers (from_driver_id)",
+        "CREATE INDEX IF NOT EXISTS idx_gas_transfers_to_status ON gas_transfers (to_car, status)",
+        "CREATE INDEX IF NOT EXISTS idx_gas_transfers_to_driver_status ON gas_transfers (to_driver_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_repairs_car_status ON repairs (LOWER(car_number), status)",
+    ]
+    try:
+        cursor.execute("SET lock_timeout = '2s'")
+        cursor.execute("SET statement_timeout = '15s'")
+        for sql in index_sql_list:
+            try:
+                cursor.execute(sql)
+                conn.commit()
+            except Exception as e:
+                print("SPEED INDEX SKIPPED:", e)
+                conn.rollback()
+        try:
+            cursor.execute("RESET lock_timeout")
+            cursor.execute("RESET statement_timeout")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    except Exception as e:
+        print("ENSURE SPEED INDEXES ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+ensure_speed_indexes()
 
 USERS = {
     492894595: {"role": "director", "name": "Jahongir Ganiyev"},
@@ -1297,7 +1359,7 @@ def get_staff_by_id(driver_id):
 
 
 def update_driver_status_in_google_sheet(telegram_id, status):
-    try:
+    def _task():
         rows = drivers_ws.get_all_values()
         target = str(telegram_id)
 
@@ -1312,13 +1374,12 @@ def update_driver_status_in_google_sheet(telegram_id, status):
 
         return False
 
-    except Exception as e:
-        print("UPDATE DRIVER STATUS IN SHEET ERROR:", e)
-        return False
+    run_sheet_background("update_driver_status_in_google_sheet", _task)
+    return True
 
 
 def delete_driver_from_google_sheet(telegram_id):
-    try:
+    def _task():
         rows = drivers_ws.get_all_values()
         target = str(telegram_id)
 
@@ -1332,9 +1393,8 @@ def delete_driver_from_google_sheet(telegram_id):
 
         return False
 
-    except Exception as e:
-        print("DELETE DRIVER FROM SHEET ERROR:", e)
-        return False
+    run_sheet_background("delete_driver_from_google_sheet", _task)
+    return True
 
 
 async def clear_blocked_user_bot_messages(context, telegram_id):
@@ -1736,13 +1796,16 @@ def get_staff_by_telegram_id(telegram_id):
 
 
 def sync_driver_status_to_sheet(telegram_id, status):
-    try:
+    def _task():
         rows = drivers_ws.get_all_values()
         for i, row in enumerate(rows, start=1):
             if len(row) > 0 and str(row[0]) == str(telegram_id):
                 drivers_ws.update_cell(i, 7, status)
-    except Exception as e:
-        print("SYNC DRIVER STATUS TO SHEET ERROR:", e)
+                return True
+        return False
+
+    run_sheet_background("sync_driver_status_to_sheet", _task)
+    return True
 
 
 async def notify_registered_employee(context, telegram_id, status, work_role):
