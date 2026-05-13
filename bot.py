@@ -29,6 +29,8 @@ from telegram.ext import (
     ContextTypes,
 )
 
+from telegram.error import BadRequest
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 TASHKENT_TZ = ZoneInfo("Asia/Tashkent")
@@ -907,6 +909,29 @@ async def clear_technadzor_staff_inline(context, chat_id):
 
     context.user_data.pop("technadzor_staff_message_id", None)
     context.user_data.pop("technadzor_staff_inline_message_id", None)
+
+
+
+async def safe_edit_message_text(query, text_value, reply_markup=None, parse_mode=None):
+    """Telegram 'Message is not modified' хатосида бот йиқилмаслиги учун."""
+    try:
+        await safe_edit_message_text(query, 
+            text_value,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+        return True
+    except BadRequest as e:
+        if "Message is not modified" in str(e):
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            return False
+        raise
+    except Exception as e:
+        print("SAFE EDIT MESSAGE TEXT ERROR:", e)
+        return False
 
 
 def get_car_type_by_number(car_number):
@@ -1920,7 +1945,93 @@ def diesel_transfer_sender_after_view_keyboard(transfer_id, rejected=True):
     return InlineKeyboardMarkup([])
 
 
+
+async def show_zapravshik_rejected_notifications_list(message, context, user_id):
+    await clear_all_inline_messages(context, message.chat_id)
+    context.user_data["mode"] = "zapravshik_diesel_notifications_rejected"
+    await message.reply_text(
+        "📩 Рад этилган приход ва расход хабарлари:",
+        reply_markup=only_back_keyboard()
+    )
+    msg = await message.reply_text(
+        "Рўйхатдан маълумотни танланг:",
+        reply_markup=zapravshik_rejected_diesel_notifications_keyboard(user_id)
+    )
+    remember_inline_message(context, msg)
+
+
+async def show_zapravshik_pending_notifications_list(message, context, user_id):
+    await clear_all_inline_messages(context, message.chat_id)
+    context.user_data["mode"] = "zapravshik_diesel_notifications_pending"
+    await message.reply_text(
+        "⏳ Текширувда турган приход ва расход хабарлари:",
+        reply_markup=only_back_keyboard()
+    )
+    msg = await message.reply_text(
+        "Рўйхатдан маълумотни танланг:",
+        reply_markup=zapravshik_pending_diesel_notifications_keyboard(user_id)
+    )
+    remember_inline_message(context, msg)
+
+
+async def send_zapravshik_prihod_returned_media(query, context, record_id):
+    if not diesel_prihod_row_to_context(record_id, context):
+        await query.answer("Маълумот топилмади.", show_alert=True)
+        return
+
+    if int(context.user_data.get("diesel_prihod_telegram_id") or 0) != int(query.from_user.id):
+        await query.answer("Бу маълумот сиз учун эмас.", show_alert=True)
+        return
+
+    try:
+        await query.message.delete()
+    except Exception:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+    # 1) Янги карточка
+    await query.message.chat.send_message(
+        diesel_prihod_card_text(
+            context,
+            status="Қайтди",
+            receiver_comment=context.user_data.get("diesel_prihod_receiver_comment")
+        )
+    )
+
+    # 2) Расм бўлса расм
+    photo_id = context.user_data.get("diesel_prihod_photo_id")
+    if photo_id:
+        try:
+            await query.message.chat.send_photo(photo=photo_id)
+        except Exception as e:
+            print("ZAPRAVSHIK RETURN PRIHOD PHOTO ERROR:", e)
+
+    # 3) Видео бўлса видео
+    video_id = context.user_data.get("diesel_prihod_video_id")
+    if video_id:
+        try:
+            await query.message.chat.send_video_note(video_note=video_id)
+        except Exception:
+            try:
+                await query.message.chat.send_video(video=video_id)
+            except Exception as e:
+                print("ZAPRAVSHIK RETURN PRIHOD VIDEO ERROR:", e)
+
+    # 4) Энг пастда кнопкалар, Кўриш қайта чиқмайди
+    msg = await query.message.chat.send_message(
+        "Маълумот тўғрими?",
+        reply_markup=diesel_prihod_sender_returned_after_view_keyboard(record_id)
+    )
+    remember_inline_message(context, msg)
+
+
 async def send_zapravshik_prihod_notification_card(query, context, record_id, returned=True):
+    context.user_data["mode"] = "zapravshik_notif_prihod_return_card" if returned else "zapravshik_notif_prihod_pending_card"
+    context.user_data["zapravshik_notif_card_kind"] = "rejected" if returned else "pending"
+    context.user_data["zapravshik_notif_record_id"] = str(record_id)
+
     if not diesel_prihod_row_to_context(record_id, context):
         await query.answer("Маълумот топилмади.", show_alert=True)
         return
@@ -1958,6 +2069,10 @@ async def send_zapravshik_prihod_notification_card(query, context, record_id, re
 
 
 async def send_zapravshik_diesel_notification_card(query, context, transfer_id, rejected=True):
+    context.user_data["mode"] = "zapravshik_notif_diesel_rejected_card" if rejected else "zapravshik_notif_diesel_pending_card"
+    context.user_data["zapravshik_notif_card_kind"] = "rejected" if rejected else "pending"
+    context.user_data["zapravshik_notif_transfer_id"] = str(transfer_id)
+
     row = get_diesel_transfer_full_row(transfer_id)
     if not row:
         await query.answer("Маълумот топилмади.", show_alert=True)
@@ -4598,6 +4713,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
+    # === V76: Заправшик уведомления карточкасидан Орқага -> рўйхат ===
+    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode in [
+        "zapravshik_notif_prihod_return_card",
+        "zapravshik_notif_diesel_rejected_card",
+        "zapravshik_notif_prihod_pending_card",
+        "zapravshik_notif_diesel_pending_card",
+        "diesel_prihod_db_card",
+        "diesel_prihod_db_edit_menu",
+        "diesel_prihod_db_edit_firm",
+        "diesel_prihod_db_edit_liter",
+        "diesel_prihod_db_edit_note",
+        "diesel_prihod_db_edit_video",
+        "diesel_prihod_db_edit_photo",
+        "dieselgive_edit_menu",
+        "dieselgive_edit_firm",
+        "dieselgive_edit_car",
+        "dieselgive_edit_liter",
+        "dieselgive_edit_note",
+        "dieselgive_edit_video",
+    ]:
+        await clear_all_inline_messages(context, update.effective_chat.id)
+        diesel_prihod_clear_staged(context)
+
+        card_kind = context.user_data.get("zapravshik_notif_card_kind") or "rejected"
+        user_id = update.effective_user.id
+
+        # Вақтинчалик таҳрирлар базага сақланмайди.
+        context.user_data.pop("diesel_edit_rejected_id", None)
+        context.user_data.pop("dieselgive_firm", None)
+        context.user_data.pop("dieselgive_liter", None)
+        context.user_data.pop("dieselgive_note", None)
+        context.user_data.pop("dieselgive_video_id", None)
+
+        if card_kind == "pending":
+            await show_zapravshik_pending_notifications_list(update.message, context, user_id)
+        else:
+            await show_zapravshik_rejected_notifications_list(update.message, context, user_id)
+        return
+
     # === V70: BLOCK қилинган ходим ботдан фойдалана олмайди ===
     if get_user(update) is None:
         current_status = get_driver_status(update.effective_user.id)
@@ -4836,6 +4990,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if text == "🟡 Дизел бўлими":
+            diesel_prihod_clear_staged(context)
             context.user_data.clear()
             context.user_data["mode"] = "zapravshik_diesel_menu"
             await update.message.reply_text("🟡 Дизел бўлими", reply_markup=zapravshik_diesel_menu_keyboard())
@@ -4851,29 +5006,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if text == "📩 Приход/Расход хабарлари":
-            context.user_data["mode"] = "zapravshik_diesel_notifications_rejected"
-            await update.message.reply_text(
-                "📩 Рад этилган приход ва расход хабарлари:",
-                reply_markup=only_back_keyboard()
-            )
-            msg = await update.message.reply_text(
-                "Рўйхатдан маълумотни танланг:",
-                reply_markup=zapravshik_rejected_diesel_notifications_keyboard(update.effective_user.id)
-            )
-            remember_inline_message(context, msg)
+            await show_zapravshik_rejected_notifications_list(update.message, context, update.effective_user.id)
             return
 
         if text == "⏳ Тасдиқлаш ҳолати":
-            context.user_data["mode"] = "zapravshik_diesel_notifications_pending"
-            await update.message.reply_text(
-                "⏳ Текширувда турган приход ва расход хабарлари:",
-                reply_markup=only_back_keyboard()
-            )
-            msg = await update.message.reply_text(
-                "Рўйхатдан маълумотни танланг:",
-                reply_markup=zapravshik_pending_diesel_notifications_keyboard(update.effective_user.id)
-            )
-            remember_inline_message(context, msg)
+            await show_zapravshik_pending_notifications_list(update.message, context, update.effective_user.id)
             return
 
         if text.startswith("📦 Бошқа дизел расходлар"):
@@ -7218,6 +7355,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_zapravshik_prihod_pending_media(query, context, record_id)
         return
 
+    if data.startswith("diesel_prihod_return_media|"):
+        record_id = data.split("|", 1)[1]
+        await send_zapravshik_prihod_returned_media(query, context, record_id)
+        return
+
     if data.startswith("znotif_diesel_pending_media|"):
         transfer_id = data.split("|", 1)[1]
         row = get_diesel_transfer_full_row(transfer_id)
@@ -8104,7 +8246,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "tz_staff|drivers":
-        await query.edit_message_text(
+        await safe_edit_message_text(query, 
             "🚚 Ҳайдовчилар\n\nФирмани танланг:",
             reply_markup=technadzor_staff_firms_keyboard("drivers")
         )
@@ -8113,7 +8255,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "tz_staff|mechanics":
         context.user_data["technadzor_staff_type"] = "mechanics"
         context.user_data.pop("technadzor_staff_firm", None)
-        await query.edit_message_text(
+        await safe_edit_message_text(query, 
             technadzor_staff_list_text("mechanics"),
             reply_markup=technadzor_staff_list_inline_keyboard("mechanics")
         )
@@ -8122,7 +8264,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "tz_staff|zapravshik":
         context.user_data["technadzor_staff_type"] = "zapravshik"
         context.user_data.pop("technadzor_staff_firm", None)
-        await query.edit_message_text(
+        await safe_edit_message_text(query, 
             technadzor_staff_list_text("zapravshik"),
             reply_markup=technadzor_staff_list_inline_keyboard("zapravshik")
         )
@@ -8139,7 +8281,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["technadzor_staff_type"] = staff_type
         context.user_data["technadzor_staff_firm"] = firm
 
-        await query.edit_message_text(
+        await safe_edit_message_text(query, 
             technadzor_staff_list_text(staff_type, firm),
             reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
         )
@@ -8150,7 +8292,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         technadzor_clear_pending_decision_done(context, driver_id)
         context.user_data["mode"] = "technadzor_staff_card"
         context.user_data["technadzor_selected_staff_id"] = driver_id
-        await query.edit_message_text(
+        await safe_edit_message_text(query, 
             technadzor_staff_card_text(driver_id),
             reply_markup=technadzor_pending_registration_card_keyboard(driver_id)
         )
@@ -8164,7 +8306,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "firm": context.user_data.get("technadzor_staff_firm"),
         })
         context.user_data["technadzor_selected_staff_id"] = driver_id
-        await query.edit_message_text(
+        await safe_edit_message_text(query, 
             technadzor_staff_card_text(driver_id),
             reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
@@ -8179,7 +8321,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "driver_id": driver_id,
         })
         context.user_data["technadzor_selected_staff_id"] = driver_id
-        await query.edit_message_text(
+        await safe_edit_message_text(query, 
             "✏️ Қайси маълумотни таҳрирлайсиз?",
             reply_markup=technadzor_staff_edit_keyboard(driver_id)
         )
@@ -8288,7 +8430,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["technadzor_staff_type"] = staff_type
         context.user_data["technadzor_staff_firm"] = firm
 
-        await query.edit_message_text(
+        await safe_edit_message_text(query, 
             "🗑 Ходим PostgreSQL ва Google Sheetsдан ўчирилди.\n\n"
             + technadzor_staff_list_text(staff_type, firm),
             reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
@@ -8330,7 +8472,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif new_status == "Тасдиқланди":
             await notify_staff_play(context, telegram_id)
 
-        await query.edit_message_text(
+        await safe_edit_message_text(query, 
             technadzor_staff_card_text(driver_id),
             reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
@@ -8343,7 +8485,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Inline орқага фақат битта амал орқага қайтаради.
         # Бу ерда rollback қилинмайди.
         if staff and staff.get("status") == "Текширувда":
-            await query.edit_message_text(
+            await safe_edit_message_text(query, 
                 technadzor_staff_card_text(driver_id),
                 reply_markup=technadzor_pending_registration_card_keyboard(driver_id)
             )
@@ -8356,7 +8498,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not last:
             staff_type = context.user_data.get("technadzor_staff_type", "drivers")
             firm = context.user_data.get("technadzor_staff_firm")
-            await query.edit_message_text(
+            await safe_edit_message_text(query, 
                 technadzor_staff_list_text(staff_type, firm),
                 reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
             )
@@ -8365,7 +8507,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if last.get("screen") == "list":
             staff_type = last.get("staff_type", "drivers")
             firm = last.get("firm")
-            await query.edit_message_text(
+            await safe_edit_message_text(query, 
                 technadzor_staff_list_text(staff_type, firm),
                 reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
             )
@@ -8373,7 +8515,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if last.get("screen") == "card":
             driver_id = last.get("driver_id")
-            await query.edit_message_text(
+            await safe_edit_message_text(query, 
                 technadzor_staff_card_text(driver_id),
                 reply_markup=technadzor_staff_card_reply_markup(driver_id)
             )
@@ -8383,13 +8525,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             driver_id = last.get("driver_id")
             staff = get_staff_by_id(driver_id)
             if staff and staff.get("status") == "Текширувда":
-                await query.edit_message_text(
+                await safe_edit_message_text(query, 
                     technadzor_staff_card_text(driver_id),
                     reply_markup=technadzor_pending_registration_card_keyboard(driver_id)
                 )
                 return
 
-            await query.edit_message_text(
+            await safe_edit_message_text(query, 
                 "✏️ Қайси маълумотни таҳрирлайсиз?",
                 reply_markup=technadzor_staff_edit_keyboard(driver_id)
             )
@@ -8399,14 +8541,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         back_to = data.split("|", 1)[1]
 
         if back_to == "staff_menu":
-            await query.edit_message_text(
+            await safe_edit_message_text(query, 
                 "👥 Ходимлар менюси",
                 reply_markup=technadzor_staff_menu_inline_keyboard()
             )
             return
 
         if back_to == "drivers_firms":
-            await query.edit_message_text(
+            await safe_edit_message_text(query, 
                 "🚚 Ҳайдовчилар\n\nФирмани танланг:",
                 reply_markup=technadzor_staff_firms_keyboard("drivers")
             )
