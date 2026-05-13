@@ -1651,6 +1651,10 @@ def can_spend_diesel_amount(liter):
     return total_stock >= spend and total_stock > 0, total_stock, spend
 
 
+def is_zapravshik_diesel_expense_flow(context):
+    return context.user_data.get("dieselgive_from_car") == "Заправщик"
+
+
 def get_diesel_stock_by_firm(firm):
     prihod = get_diesel_prihod_sum_by_firm(firm)
     rashod = get_diesel_rashod_sum_by_firm(firm)
@@ -1658,12 +1662,20 @@ def get_diesel_stock_by_firm(firm):
 
 
 def diesel_prihod_firm_stock_keyboard():
+    # Заправшик дизел менюсида фирмалар олдида остатка кўринади.
     rows = []
     for firm in FIRM_NAMES:
         _, _, ostatka = get_diesel_stock_by_firm(firm)
         rows.append([KeyboardButton(f"{firm} [ост:{format_liter(ostatka)} л]")])
 
     rows.append([KeyboardButton(f"📦 Бошқа дизел расходлар [ост:-{format_liter(get_other_diesel_expense_total())} л]")])
+    rows.append([KeyboardButton("⬅️ Орқага")])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
+
+def diesel_firm_plain_keyboard():
+    # Ҳайдовчи ролида фирмалар олдида остатка кўринмайди.
+    rows = [[KeyboardButton(firm)] for firm in FIRM_NAMES]
     rows.append([KeyboardButton("⬅️ Орқага")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
@@ -5581,7 +5593,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
-            reply_markup=diesel_prihod_firm_stock_keyboard()
+            reply_markup=(
+                diesel_prihod_firm_stock_keyboard()
+                if is_zapravshik_diesel_expense_flow(context)
+                else diesel_firm_plain_keyboard()
+            )
         )
         return
 
@@ -5617,36 +5633,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
-            reply_markup=diesel_prihod_firm_stock_keyboard()
+            reply_markup=(
+                diesel_prihod_firm_stock_keyboard()
+                if is_zapravshik_diesel_expense_flow(context)
+                else diesel_firm_plain_keyboard()
+            )
         )
         return
 
     if mode in ["dieselgive_firm", "dieselgive_edit_firm"]:
         firm_name = extract_firm_from_stock_button(text)
 
+        reply_keyboard_for_firm = (
+            diesel_prihod_firm_stock_keyboard()
+            if is_zapravshik_diesel_expense_flow(context)
+            else diesel_firm_plain_keyboard()
+        )
+
         if text.startswith("📦 Бошқа дизел расходлар"):
             await update.message.reply_text(
                 "❌ Бу менюдан оддий дизел расход қилиб бўлмайди.\n"
                 "📦 Бошқа дизел расходлар алоҳида ҳисобланади.",
-                reply_markup=diesel_prihod_firm_stock_keyboard()
+                reply_markup=reply_keyboard_for_firm
             )
             return
 
         if firm_name not in FIRM_NAMES:
             await update.message.reply_text(
                 "❌ Фирмани пастки менюдан танланг.",
-                reply_markup=diesel_prihod_firm_stock_keyboard()
+                reply_markup=reply_keyboard_for_firm
             )
             return
 
-        total_stock = get_total_company_diesel_stock()
-        if total_stock <= 0:
-            await update.message.reply_text(
-                "❌ Дизел остаткаси йўқ. Расход қилиб бўлмайди.\n\n"
-                f"Жами фирмалар остаткаси: {format_liter(total_stock)} л",
-                reply_markup=diesel_prihod_firm_stock_keyboard()
-            )
-            return
+        if is_zapravshik_diesel_expense_flow(context):
+            total_stock = get_total_company_diesel_stock()
+            if total_stock <= 0:
+                await update.message.reply_text(
+                    "❌ Дизел остаткаси йўқ. Расход қилиб бўлмайди.\n\n"
+                    f"Жами фирмалар остаткаси: {format_liter(total_stock)} л",
+                    reply_markup=diesel_prihod_firm_stock_keyboard()
+                )
+                return
 
         context.user_data["dieselgive_firm"] = firm_name
 
@@ -5696,16 +5723,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
     
-        can_spend, total_stock, spend = can_spend_diesel_amount(text)
-        if not can_spend:
-            await update.message.reply_text(
-                "❌ Дизел остаткаси етарли эмас.\n\n"
-                f"Жами фирмалар остаткаси: {format_liter(total_stock)} л\n"
-                f"Сиз киритган расход: {format_liter(spend)} л\n\n"
-                "Бошқа дизел расходлар остаткаси бу ҳисобга қўшилмайди.",
-                reply_markup=back_keyboard()
-            )
-            return
+        if is_zapravshik_diesel_expense_flow(context):
+            can_spend, total_stock, spend = can_spend_diesel_amount(text)
+            if not can_spend:
+                await update.message.reply_text(
+                    "❌ Дизел остаткаси етарли эмас.\n\n"
+                    f"Жами фирмалар остаткаси: {format_liter(total_stock)} л\n"
+                    f"Сиз киритган расход: {format_liter(spend)} л\n\n"
+                    "Бошқа дизел расходлар остаткаси бу ҳисобга қўшилмайди.",
+                    reply_markup=back_keyboard()
+                )
+                return
 
         context.user_data["dieselgive_liter"] = text
         context.user_data["mode"] = "dieselgive_note"
@@ -8882,7 +8910,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
-            reply_markup=diesel_prihod_firm_stock_keyboard()
+            reply_markup=(
+                diesel_prihod_firm_stock_keyboard()
+                if is_zapravshik_diesel_expense_flow(context)
+                else diesel_firm_plain_keyboard()
+            )
         )
         return
 
@@ -9451,20 +9483,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         firm = context.user_data.get("dieselgive_firm")
         liter = context.user_data.get("dieselgive_liter")
 
-        can_spend, total_stock, spend = can_spend_diesel_amount(liter)
-        if not can_spend:
-            try:
-                await query.edit_message_reply_markup(reply_markup=None)
-            except Exception:
-                pass
+        if is_zapravshik_diesel_expense_flow(context):
+            can_spend, total_stock, spend = can_spend_diesel_amount(liter)
+            if not can_spend:
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
 
-            await query.message.reply_text(
-                "❌ Дизел остаткаси етарли эмас.\n\n"
-                f"Жами фирмалар остаткаси: {format_liter(total_stock)} л\n"
-                f"Сиз киритган расход: {format_liter(spend)} л",
-                reply_markup=diesel_report_keyboard()
-            )
-            return
+                await query.message.reply_text(
+                    "❌ Дизел остаткаси етарли эмас.\n\n"
+                    f"Жами фирмалар остаткаси: {format_liter(total_stock)} л\n"
+                    f"Сиз киритган расход: {format_liter(spend)} л",
+                    reply_markup=diesel_report_keyboard()
+                )
+                return
         note = context.user_data.get("dieselgive_note")
         video_id = context.user_data.get("dieselgive_video_id")
 
@@ -10065,7 +10098,11 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
 
         await query.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
-            reply_markup=diesel_prihod_firm_stock_keyboard()
+            reply_markup=(
+                diesel_prihod_firm_stock_keyboard()
+                if is_zapravshik_diesel_expense_flow(context)
+                else diesel_firm_plain_keyboard()
+            )
         )
         return
 
