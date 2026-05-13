@@ -44,6 +44,53 @@ except Exception as e:
     print("DB TIMEZONE SET ERROR:", e)
     conn.rollback()
 
+# =====================
+# SAFE SPEED CACHE v9
+# =====================
+# Қисқа TTL cache: менюларда такрорий SELECT'ларни камайтиради.
+# DB структураси ва callback flow ўзгармайди.
+CACHE_TTL_SECONDS = 10
+_speed_cache = {}
+
+def cache_get(key):
+    try:
+        item = _speed_cache.get(key)
+        if not item:
+            return None
+        created_at, value = item
+        if time.time() - created_at > CACHE_TTL_SECONDS:
+            _speed_cache.pop(key, None)
+            return None
+        return value
+    except Exception:
+        return None
+
+def cache_set(key, value):
+    try:
+        _speed_cache[key] = (time.time(), value)
+    except Exception:
+        pass
+    return value
+
+def clear_speed_cache(prefix=None):
+    try:
+        if prefix is None:
+            _speed_cache.clear()
+            return
+        for key in list(_speed_cache.keys()):
+            if str(key).startswith(str(prefix)):
+                _speed_cache.pop(key, None)
+    except Exception:
+        pass
+
+def clear_driver_cache():
+    clear_speed_cache("driver:")
+    clear_speed_cache("driver_by_car:")
+
+def clear_car_cache():
+    clear_speed_cache("cars:")
+    clear_speed_cache("car_type_by_number:")
+
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS drivers (
@@ -348,6 +395,7 @@ def sync_cars_to_db():
     conn.commit()
 
 sync_cars_to_db()
+clear_car_cache()
 
 print("CARS SYNCED")
 
@@ -544,6 +592,11 @@ def get_user_name(update):
 def get_driver_status(user_id):
     global conn, cursor
 
+    cache_key = f"driver:status:{int(user_id)}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         cursor.execute("""
             SELECT status
@@ -555,9 +608,9 @@ def get_driver_status(user_id):
         row = cursor.fetchone()
 
         if row:
-            return row[0] or ""
+            return cache_set(cache_key, row[0] or "")
 
-        return None
+        return cache_set(cache_key, None)
 
     except Exception as e:
         print("GET DRIVER STATUS ERROR:", e)
@@ -581,7 +634,7 @@ def get_driver_status(user_id):
             row = cursor.fetchone()
 
             if row:
-                return row[0] or ""
+                return cache_set(cache_key, row[0] or "")
 
         except Exception as e2:
             print("RECONNECT DRIVER STATUS ERROR:", e2)
@@ -589,6 +642,11 @@ def get_driver_status(user_id):
     return None
 
 def get_driver_car(user_id):
+    cache_key = f"driver:car:{int(user_id)}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     cursor.execute("""
         SELECT car
         FROM drivers
@@ -597,14 +655,16 @@ def get_driver_car(user_id):
     """, (int(user_id),))
 
     row = cursor.fetchone()
-
-    if row:
-        return row[0] or ""
-
-    return ""
+    value = (row[0] or "") if row else ""
+    return cache_set(cache_key, value)
 
 
 def get_driver_work_role(user_id):
+    cache_key = f"driver:work_role:{int(user_id)}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     cursor.execute("""
         SELECT work_role
         FROM drivers
@@ -613,11 +673,57 @@ def get_driver_work_role(user_id):
     """, (int(user_id),))
 
     row = cursor.fetchone()
+    value = (row[0] or "driver") if row else "driver"
+    return cache_set(cache_key, value)
 
-    if row:
-        return row[0] or "driver"
 
-    return "driver"
+def get_driver_full_name_by_telegram_id(user_id):
+    cache_key = f"driver:full_name:{int(user_id)}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        cursor.execute("""
+            SELECT name, surname
+            FROM drivers
+            WHERE telegram_id = %s
+            LIMIT 1
+        """, (int(user_id),))
+
+        row = cursor.fetchone()
+        if not row:
+            return cache_set(cache_key, "")
+
+        name = (row[0] or "").strip()
+        surname = (row[1] or "").strip()
+        full_name = f"{surname} {name}".strip()
+        return cache_set(cache_key, full_name)
+
+    except Exception as e:
+        print("GET DRIVER FULL NAME ERROR:", e)
+        try:
+            conn.rollback()
+        except:
+            pass
+        return ""
+
+
+def diesel_sender_display_name(from_car, from_driver_id=None, context=None):
+    # Агар дизелни заправщик берган бўлса, карточкада "Заправщик" эмас,
+    # заправщикнинг Ф.И.Ш. кўринсин. DB status ва from_car структураси ўзгармайди.
+    if str(from_car or "").strip() == "Заправщик":
+        giver_name = ""
+
+        if context is not None:
+            giver_name = (context.user_data.get("dieselgive_from_name") or "").strip()
+
+        if not giver_name and from_driver_id:
+            giver_name = get_driver_full_name_by_telegram_id(from_driver_id)
+
+        return giver_name or "Заправщик"
+
+    return str(from_car or "-")
 
 
 def work_role_title(work_role):
@@ -631,6 +737,11 @@ def work_role_title(work_role):
 
 
 def get_driver_firm(user_id):
+    cache_key = f"driver:firm:{int(user_id)}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     cursor.execute("""
         SELECT firm
         FROM drivers
@@ -639,11 +750,8 @@ def get_driver_firm(user_id):
     """, (int(user_id),))
 
     row = cursor.fetchone()
-
-    if row:
-        return row[0] or ""
-
-    return ""
+    value = (row[0] or "") if row else ""
+    return cache_set(cache_key, value)
 
 def update_driver_status(user_id, status):
     cursor.execute("""
@@ -653,6 +761,7 @@ def update_driver_status(user_id, status):
     """, (status, int(user_id)))
 
     conn.commit()
+    clear_driver_cache()
     return True
 
     return False
@@ -950,7 +1059,7 @@ async def clear_technadzor_staff_inline(context, chat_id):
 async def safe_edit_message_text(query, text_value, reply_markup=None, parse_mode=None):
     """Telegram 'Message is not modified' хатосида бот йиқилмаслиги учун."""
     try:
-        await safe_edit_message_text(query, 
+        await query.edit_message_text(
             text_value,
             reply_markup=reply_markup,
             parse_mode=parse_mode
@@ -963,15 +1072,48 @@ async def safe_edit_message_text(query, text_value, reply_markup=None, parse_mod
             except Exception:
                 pass
             return False
-        raise
+        print("SAFE EDIT MESSAGE TEXT BADREQUEST:", e)
+        return False
     except Exception as e:
         print("SAFE EDIT MESSAGE TEXT ERROR:", e)
+        return False
+
+
+async def safe_clear_inline_keyboard(context, chat_id, message_id):
+    """Inline keyboard'ни хавфсиз ўчиради: хабар топилмаса ҳам бот йиқилмайди."""
+    try:
+        if not chat_id or not message_id:
+            return False
+        await context.bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=int(message_id),
+            reply_markup=None
+        )
+        return True
+    except BadRequest as e:
+        text = str(e)
+        if (
+            "Message is not modified" in text
+            or "message to edit not found" in text
+            or "message can't be edited" in text
+            or "message is not modified" in text.lower()
+        ):
+            return False
+        print("SAFE CLEAR INLINE BADREQUEST:", e)
+        return False
+    except Exception as e:
+        print("SAFE CLEAR INLINE ERROR:", e)
         return False
 
 
 def get_car_type_by_number(car_number):
     if not car_number:
         return ""
+
+    cache_key = f"car_type_by_number:{str(car_number).strip().lower()}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         cursor.execute("""
@@ -982,7 +1124,8 @@ def get_car_type_by_number(car_number):
         """, (car_number,))
         row = cursor.fetchone()
         if row:
-            return row[0] or ""
+            return cache_set(cache_key, row[0] or "")
+        return cache_set(cache_key, "")
     except Exception as e:
         print("GET CAR TYPE ERROR:", e)
 
@@ -2937,9 +3080,13 @@ def diesel_confirm_text(context):
     except Exception:
         shown_time = created_time
 
+    from_car = context.user_data.get("dieselgive_from_car")
+    from_display = diesel_sender_display_name(from_car, context=context)
+    from_label = "🚛 Дизел берган" if str(from_car or "").strip() == "Заправщик" else "🚛 Дизел берган техника номери"
+
     return (
         "✅ ДИЗЕЛ БЕРИШ МАЪЛУМОТЛАРИ\n\n"
-        f"🚛 Дизел берган техника номери: {context.user_data.get('dieselgive_from_car')}\n"
+        f"{from_label}: {from_display}\n"
         f"🚛 Дизел олган техника номери: {context.user_data.get('dieselgive_to_car')}\n"
         f"🕒 Вақт: {shown_time}\n"
         f"⛽ Литр: {context.user_data.get('dieselgive_liter')}\n"
@@ -3031,6 +3178,12 @@ def schedule_gas_auto_accept_task(context, transfer_id):
 
 
 def get_driver_by_car(car):
+    car_key = (car or "").strip().lower()
+    cache_key = f"driver_by_car:{car_key}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     cursor.execute("""
         SELECT telegram_id, name, surname
         FROM drivers
@@ -3039,7 +3192,7 @@ def get_driver_by_car(car):
         LIMIT 1
     """, (car,))
 
-    return cursor.fetchone()
+    return cache_set(cache_key, cursor.fetchone())
 
 def short_driver_name(row):
     if not row:
@@ -3372,6 +3525,10 @@ def edit_keyboard_remove():
 
 
 def get_all_cars():
+    cached = cache_get("cars:all")
+    if cached is not None:
+        return cached
+
     cursor.execute("""
         SELECT firm, car_number, car_type, status, fuel_type
         FROM cars
@@ -3393,7 +3550,7 @@ def get_all_cars():
             row[4] or ""    # 7 fuel_type
         ])
 
-    return result
+    return cache_set("cars:all", result)
 
 def get_car_type(car):
     for row in get_all_cars():
@@ -3702,6 +3859,7 @@ def update_car_status(car, status):
             """, (status, car))
 
             conn.commit()
+            clear_car_cache()
             return True
 
         except Exception as e2:
@@ -3862,7 +4020,9 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
         print(f"DIESEL TRANSFER RECEIVER NOT FOUND: transfer_id={transfer_id}, to_car={to_car}")
         return
 
-    sender_text = f"{from_car} — {from_driver_name}" if from_driver_name else str(from_car)
+    sender_text = diesel_sender_display_name(from_car, from_driver_id=from_driver_id)
+    if str(from_car or "").strip() != "Заправщик" and from_driver_name:
+        sender_text = f"{from_car} — {from_driver_name}"
 
     message_text = (
         "⛽ Сизга Дизел берилди\n\n"
@@ -3891,12 +4051,14 @@ async def notify_diesel_sender_confirmed(context, transfer_id):
         return
 
     from_driver_id, from_car, to_car, liter = row
+    from_display = diesel_sender_display_name(from_car, from_driver_id=from_driver_id)
+    from_label = "🚛 Дизел берган" if str(from_car or "").strip() == "Заправщик" else "🚛 Берган техника"
 
     await context.bot.send_message(
         chat_id=int(from_driver_id),
         text=(
             "✅ Дизел бериш маълумотингиз тасдиқланди.\n\n"
-            f"🚛 Берган техника: {from_car}\n"
+            f"{from_label}: {from_display}\n"
             f"🚛 Олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
             "📌 Статус: Қабул қилинди"
@@ -4057,7 +4219,9 @@ async def send_diesel_transfer_to_receiver(context, transfer_id):
         print(f"DIESEL TRANSFER RECEIVER NOT FOUND: transfer_id={transfer_id}, to_car={to_car}")
         return
 
-    sender_text = f"{from_car} — {from_driver_name}" if from_driver_name else str(from_car)
+    sender_text = diesel_sender_display_name(from_car, from_driver_id=from_driver_id)
+    if str(from_car or "").strip() != "Заправщик" and from_driver_name:
+        sender_text = f"{from_car} — {from_driver_name}"
 
     message_text = (
         "⛽ Сизга Дизел берилди\n\n"
@@ -4091,7 +4255,7 @@ async def notify_diesel_sender_confirmed(context, transfer_id):
     await context.bot.send_message(
         chat_id=int(from_driver_id),
         text=(
-            "✅ Дизел бериш маълумотингиз тасдиқланди.\n\\n"
+            "✅ Дизел бериш маълумотингиз тасдиқланди.\n\n"
             f"🚛 Берган техника: {from_car}\n"
             f"🚛 Олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
@@ -5123,6 +5287,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
             context.user_data["mode"] = "dieselgive_firm"
             context.user_data["dieselgive_from_car"] = "Заправщик"
+            context.user_data["dieselgive_from_name"] = get_driver_full_name_by_telegram_id(update.effective_user.id)
             await update.message.reply_text(
                 "🏢 Қайси фирмага дизел расход қиляпсиз?",
                 reply_markup=diesel_prihod_firm_stock_keyboard()
@@ -5931,6 +6096,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["mode"] = "dieselgive_firm"
         context.user_data["dieselgive_from_car"] = driver_car if work_role != "zapravshik" else "Заправщик"
+        if work_role == "zapravshik":
+            context.user_data["dieselgive_from_name"] = get_driver_full_name_by_telegram_id(update.effective_user.id)
 
         await update.message.reply_text(
             "🏢 Қайси фирмадаги техникага ДИЗЕЛ беряпсиз?",
