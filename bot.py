@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS diesel_transfers (
     firm TEXT,
     liter TEXT,
     note TEXT,
+    speedometer_photo_id TEXT,
     video_id TEXT,
     status TEXT DEFAULT 'Қабул қилувчи текширувида',
     receiver_comment TEXT,
@@ -116,6 +117,13 @@ CREATE TABLE IF NOT EXISTS diesel_transfers (
     answered_at TIMESTAMP
 )
 """)
+
+
+try:
+    cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS speedometer_photo_id TEXT")
+    conn.commit()
+except Exception as e:
+    print("DIESEL TRANSFERS ADD speedometer_photo_id ERROR:", e)
 
 
 cursor.execute("""
@@ -1733,8 +1741,16 @@ def get_other_diesel_expense_total():
 def zapravka_info_text():
     lines = ["⛽ ЗАПРАВКА МАЬЛУМОТИ", ""]
 
+    total_prihod = 0.0
+    total_rashod = 0.0
+    total_ostatka = 0.0
+
     for firm in FIRM_NAMES:
         prihod, rashod, ostatka = get_diesel_stock_by_firm(firm)
+        total_prihod += float(prihod or 0)
+        total_rashod += float(rashod or 0)
+        total_ostatka += float(ostatka or 0)
+
         lines.append(firm)
         lines.append(
             f"Приход: {format_liter(prihod)}л / "
@@ -1744,8 +1760,18 @@ def zapravka_info_text():
         lines.append("")
 
     other_total = get_other_diesel_expense_total()
+    total_rashod += float(other_total or 0)
+    total_ostatka -= float(other_total or 0)
+
     lines.append("📦 Бошқа дизел расходлар")
     lines.append(f"Остатка: -{format_liter(other_total)}л")
+    lines.append("--------------------------------")
+    lines.append("✅ ИТОГО:")
+    lines.append(
+        f"Приход: {format_liter(total_prihod)}л / "
+        f"Расход: {format_liter(total_rashod)}л / "
+        f"Остатка: {format_liter(total_ostatka)}л"
+    )
 
     return "\n".join(lines).strip()
 
@@ -2809,6 +2835,7 @@ def diesel_give_edit_keyboard():
         [InlineKeyboardButton("🚛 Техникани ўзгартириш", callback_data="diesel_edit_car")],
         [InlineKeyboardButton("⛽ Литр", callback_data="diesel_edit_liter")],
         [InlineKeyboardButton("📝 Изоҳ", callback_data="diesel_edit_note")],
+        [InlineKeyboardButton("📸 Спидометр/моточас расми", callback_data="diesel_edit_speed_photo")],
         [InlineKeyboardButton("🎥 Видео", callback_data="diesel_edit_video")]
     ])
 
@@ -2886,6 +2913,7 @@ def diesel_confirm_text(context):
         f"🕒 Вақт: {shown_time}\n"
         f"⛽ Литр: {context.user_data.get('dieselgive_liter')}\n"
         f"📝 Изоҳ: {context.user_data.get('dieselgive_note')}\n"
+        "📸 Спидометр/моточас расми: сақланди ✅\n"
         "🎥 Видео: сақланди ✅\n\n"
         "Маълумот тўғрими?"
     )
@@ -4731,6 +4759,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "dieselgive_edit_car",
         "dieselgive_edit_liter",
         "dieselgive_edit_note",
+        "dieselgive_edit_speed_photo",
         "dieselgive_edit_video",
     ]:
         await clear_all_inline_messages(context, update.effective_chat.id)
@@ -4861,7 +4890,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode == "dieselgive_video":
+    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode == "dieselgive_speed_photo":
         context.user_data["mode"] = "dieselgive_note"
         await update.message.reply_text(
             "📝 Изоҳ киритинг.",
@@ -5568,12 +5597,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         context.user_data["dieselgive_note"] = text
-        context.user_data["mode"] = "dieselgive_video"
+        context.user_data["mode"] = "dieselgive_speed_photo"
 
         await update.message.reply_text(
-            "🎥 Олди-берди қилаётган техникаларни думалоқ видео қилиб юборинг.\n\n"
-            "⏱ Видео 10 сониядан кам бўлмасин.\n"
-            "❌ Фақат думалоқ видео қабул қилинади.",
+            "📸 Спидометр ёки моточас расмини юборинг.\n\n"
+            "❌ Фақат расм қабул қилинади.",
             reply_markup=ReplyKeyboardRemove()
         )
         return
@@ -9262,6 +9290,36 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "diesel_edit_speed_photo":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_edit_speed_photo"
+
+        await query.message.reply_text(
+            "📸 Янги спидометр ёки моточас расмини юборинг.\n\n"
+            "❌ Фақат расм қабул қилинади.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if data == "diesel_edit_speed_photo":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        context.user_data["mode"] = "dieselgive_edit_speed_photo"
+
+        await query.message.reply_text(
+            "📸 Янги спидометр ёки моточас расмини юборинг.\n\n"
+            "❌ Фақат расм қабул қилинади.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
     if data == "diesel_edit_video":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -9395,6 +9453,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 firm,
                 liter,
                 note,
+                speedometer_photo_id,
                 video_id
             FROM diesel_transfers
             WHERE id = %s
@@ -9406,7 +9465,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ Маълумот топилмади.")
             return
     
-        from_driver_id, from_car, to_car, firm, liter, note, video_id = row
+        from_driver_id, from_car, to_car, firm, liter, note, speedometer_photo_id, video_id = row
     
         if int(update.effective_user.id) != int(from_driver_id):
             await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
@@ -9418,6 +9477,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["dieselgive_firm"] = firm or ""
         context.user_data["dieselgive_liter"] = liter or ""
         context.user_data["dieselgive_note"] = note or ""
+        context.user_data["dieselgive_speedometer_photo_id"] = speedometer_photo_id or ""
         context.user_data["dieselgive_video_id"] = video_id or ""
         context.user_data["mode"] = "dieselgive_edit_menu"
     
@@ -9813,6 +9873,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
         note = context.user_data.get("dieselgive_note")
+        speedometer_photo_id = context.user_data.get("dieselgive_speedometer_photo_id")
         video_id = context.user_data.get("dieselgive_video_id")
 
         rejected_transfer_id = context.user_data.get("diesel_edit_rejected_id")
@@ -9852,6 +9913,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     firm = %s,
                     liter = %s,
                     note = %s,
+                    speedometer_photo_id = %s,
                     video_id = %s,
                     status = %s,
                     receiver_comment = NULL,
@@ -9864,6 +9926,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 firm,
                 liter,
                 note,
+                speedometer_photo_id,
                 video_id,
                 "Қабул қилувчи текширувида",
                 rejected_transfer_id
@@ -9905,10 +9968,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 firm,
                 liter,
                 note,
+                speedometer_photo_id,
                 video_id,
                 status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             user_id,
@@ -9918,6 +9982,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             firm,
             liter,
             note,
+            speedometer_photo_id,
             video_id,
             transfer_status
         ))
@@ -9958,7 +10023,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         transfer_id = data.split("|", 1)[1]
 
         cursor.execute("""
-            SELECT from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, video_id, created_at
+            SELECT from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at
             FROM diesel_transfers
             WHERE id = %s
         """, (transfer_id,))
@@ -9969,7 +10034,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ Маълумот топилмади.")
             return
 
-        from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, video_id, created_at = row
+        from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, speedometer_photo_id, video_id, created_at = row
 
         if int(update.effective_user.id) != int(to_driver_id):
             await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
@@ -9990,6 +10055,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await query.message.chat.send_message(text)
+
+        if speedometer_photo_id:
+            try:
+                await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=speedometer_photo_id
+                )
+            except Exception as e:
+                print("DIESEL SPEEDOMETER PHOTO SEND ERROR:", e)
 
         if video_id:
             try:
@@ -11199,6 +11273,26 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if mode in ["dieselgive_speed_photo", "dieselgive_edit_speed_photo"]:
+        context.user_data["dieselgive_speedometer_photo_id"] = update.message.photo[-1].file_id
+
+        if mode == "dieselgive_edit_speed_photo":
+            context.user_data["mode"] = "dieselgive_confirm"
+            await update.message.reply_text(
+                diesel_confirm_text(context),
+                reply_markup=diesel_give_final_keyboard()
+            )
+            return
+
+        context.user_data["mode"] = "dieselgive_video"
+        await update.message.reply_text(
+            "🎥 Олди-берди қилаётган техникаларни думалоқ видео қилиб юборинг.\n\n"
+            "⏱ Видео 10 сониядан кам бўлмасин.\n"
+            "❌ Фақат думалоқ видео қабул қилинади.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
     if mode in ["dieselgive_video", "dieselgive_edit_video"]:
         await update.message.reply_text(
             "❌ Бу босқичда фақат думалоқ видео қабул қилинади.\n\n"
@@ -11390,6 +11484,14 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ Нотўғри маълумот киритилди.\n\n"
             "📝 Бу босқичда фақат текст изоҳ қабул қилинади.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if mode in ["dieselgive_speed_photo", "dieselgive_edit_speed_photo"]:
+        await update.message.reply_text(
+            "❌ Нотўғри маълумот киритилди.\n\n"
+            "📸 Спидометр ёки моточас расмини фақат расм кўринишида юборинг.",
             reply_markup=ReplyKeyboardRemove()
         )
         return
