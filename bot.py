@@ -4362,6 +4362,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
+    # === V69: Регистрация/ходим таҳририда фирма танлаш юқори приоритет ===
+    # Фирма номи умумий меню handler'ига тушиб кетмаслиги учун бу блок юқорида туради.
+    if mode in ["driver_firm", "driver_edit_firm", "driver_edit_firm_mechanic"]:
+        if text not in FIRM_NAMES:
+            await update.message.reply_text(
+                "❌ Фирмани пастки менюдан танланг.",
+                reply_markup=firm_keyboard()
+            )
+            return
+
+        context.user_data["driver_firm"] = text
+
+        if mode == "driver_edit_firm_mechanic":
+            context.user_data["driver_car"] = ""
+            context.user_data["mode"] = "driver_confirm"
+            await show_driver_confirm(update.message, context)
+            return
+
+        if context.user_data.get("driver_work_role") == "mechanic":
+            context.user_data["driver_car"] = ""
+            context.user_data["mode"] = "driver_confirm"
+            await show_driver_confirm(update.message, context)
+            return
+
+        next_mode = "driver_edit_car" if mode == "driver_edit_firm" else "driver_car"
+        context.user_data["driver_car"] = ""
+        context.user_data["mode"] = next_mode
+
+        await update.message.reply_text(
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=back_keyboard()
+        )
+
+        await update.message.reply_text(
+            f"🏢 Фирма: {text}\n\n🚛 Техникани танланг:",
+            reply_markup=car_buttons_by_firm(text)
+        )
+        return
+
     # === V68: Заправшик дизел уведомлениясида Орқага ===
     if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode in [
         "zapravshik_diesel_notifications_rejected",
