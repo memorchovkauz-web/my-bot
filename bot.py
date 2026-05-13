@@ -1622,10 +1622,171 @@ def zapravshik_diesel_menu_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("➕ Дизел приход")],
         [KeyboardButton("➖ Дизел расход")],
+        [KeyboardButton("🔔 Уведомления")],
         [KeyboardButton("⬅️ Орқага")],
     ], resize_keyboard=True)
 
 
+def zapravshik_diesel_notifications_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("📩 Приход/Расход хабарлари")],
+        [KeyboardButton("⏳ Тасдиқлаш ҳолати")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
+
+
+def zapravshik_rejected_diesel_notifications_keyboard(user_id):
+    buttons = []
+
+    try:
+        cursor.execute("""
+            SELECT id, liter, note, status, created_at
+            FROM diesel_prihod
+            WHERE telegram_id = %s
+              AND TRIM(COALESCE(status, '')) IN ('Қайтди', 'Кайтарилди', 'Рад этилди')
+            ORDER BY created_at DESC
+        """, (int(user_id),))
+        for record_id, liter, note, status, created_at in cursor.fetchall():
+            firm_text, _, _ = parse_diesel_prihod_note(note or "")
+            date_text = created_at.strftime("%d.%m %H:%M") if created_at else ""
+            buttons.append([
+                InlineKeyboardButton(
+                    f"➕ Приход | {date_text} | {liter} л | {firm_text or '-'}"[:60],
+                    callback_data=f"znotif_prihod_return|{record_id}"
+                )
+            ])
+    except Exception as e:
+        print("ZAPRAVSHIK REJECTED PRIHOD LIST ERROR:", e)
+
+    try:
+        cursor.execute("""
+            SELECT id, to_car, firm, liter, status, created_at
+            FROM diesel_transfers
+            WHERE from_driver_id = %s
+              AND TRIM(COALESCE(status, '')) IN ('Рад этилди', 'Қайтди', 'Кайтарилди')
+            ORDER BY created_at DESC
+        """, (int(user_id),))
+        for transfer_id, to_car, firm, liter, status, created_at in cursor.fetchall():
+            date_text = created_at.strftime("%d.%m %H:%M") if created_at else ""
+            buttons.append([
+                InlineKeyboardButton(
+                    f"➖ Расход | {date_text} | {liter} л | {to_car or '-'}"[:60],
+                    callback_data=f"znotif_diesel_rejected|{transfer_id}"
+                )
+            ])
+    except Exception as e:
+        print("ZAPRAVSHIK REJECTED DIESEL LIST ERROR:", e)
+
+    if not buttons:
+        buttons.append([InlineKeyboardButton("✅ Рад этилган дизел хабарлари йўқ", callback_data="none")])
+
+    return InlineKeyboardMarkup(buttons)
+
+
+def zapravshik_pending_diesel_notifications_keyboard(user_id):
+    buttons = []
+
+    try:
+        cursor.execute("""
+            SELECT id, liter, note, status, created_at
+            FROM diesel_prihod
+            WHERE telegram_id = %s
+              AND TRIM(COALESCE(status, '')) = 'Текширувда'
+            ORDER BY created_at DESC
+        """, (int(user_id),))
+        for record_id, liter, note, status, created_at in cursor.fetchall():
+            firm_text, _, _ = parse_diesel_prihod_note(note or "")
+            date_text = created_at.strftime("%d.%m %H:%M") if created_at else ""
+            buttons.append([
+                InlineKeyboardButton(
+                    f"➕ Приход | {date_text} | {liter} л | {firm_text or '-'}"[:60],
+                    callback_data=f"znotif_prihod_pending|{record_id}"
+                )
+            ])
+    except Exception as e:
+        print("ZAPRAVSHIK PENDING PRIHOD LIST ERROR:", e)
+
+    try:
+        cursor.execute("""
+            SELECT id, to_car, firm, liter, status, created_at
+            FROM diesel_transfers
+            WHERE from_driver_id = %s
+              AND TRIM(COALESCE(status, '')) = 'Қабул қилувчи текширувида'
+            ORDER BY created_at DESC
+        """, (int(user_id),))
+        for transfer_id, to_car, firm, liter, status, created_at in cursor.fetchall():
+            date_text = created_at.strftime("%d.%m %H:%M") if created_at else ""
+            buttons.append([
+                InlineKeyboardButton(
+                    f"➖ Расход | {date_text} | {liter} л | {to_car or '-'}"[:60],
+                    callback_data=f"znotif_diesel_pending|{transfer_id}"
+                )
+            ])
+    except Exception as e:
+        print("ZAPRAVSHIK PENDING DIESEL LIST ERROR:", e)
+
+    if not buttons:
+        buttons.append([InlineKeyboardButton("✅ Текширувда турган дизел хабарлари йўқ", callback_data="none")])
+
+    return InlineKeyboardMarkup(buttons)
+
+
+def diesel_transfer_sender_card_text(row, status_text=None):
+    if not row:
+        return "❌ Маълумот топилмади."
+
+    transfer_id, from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, video_id, status, receiver_comment, created_at = row
+    created_text = created_at.strftime("%Y-%m-%d %H:%M:%S") if created_at else now_text()
+
+    text = (
+        "⛽ ДИЗЕЛ РАСХОД\n\n"
+        f"🕒 Сана: {created_text}\n"
+        f"🏢 Фирма: {firm or '-'}\n"
+        f"🚛 Дизел берган техника: {from_car or '-'}\n"
+        f"🚛 Дизел олган техника: {to_car or '-'}\n"
+        f"⛽ Литр: {liter or '-'}\n"
+        f"📝 Изоҳ: {note or '-'}\n"
+    )
+
+    if video_id:
+        text += "🎥 Видео: сақланди ✅\n"
+
+    text += f"📌 Статус: {status_text or status or '-'}\n"
+
+    if receiver_comment:
+        text += f"💬 Рад этиш изоҳи: {receiver_comment}\n"
+
+    text += "\nМаълумот тўғрими?"
+    return text
+
+
+def get_diesel_transfer_full_row(transfer_id):
+    cursor.execute("""
+        SELECT id, from_driver_id, from_car, to_driver_id, to_car, firm, liter, note, video_id, status, receiver_comment, created_at
+        FROM diesel_transfers
+        WHERE id = %s
+        LIMIT 1
+    """, (int(transfer_id),))
+    return cursor.fetchone()
+
+
+def diesel_rejected_sender_keyboard_conditional(transfer_id, has_media=True):
+    rows = []
+    if has_media:
+        rows.append([InlineKeyboardButton("👁 Кўриш", callback_data=f"diesel_rejected_view|{transfer_id}")])
+    rows.append([InlineKeyboardButton("✅ Тасдиқлаш", callback_data=f"diesel_rejected_resend|{transfer_id}")])
+    rows.append([InlineKeyboardButton("✏️ Таҳрирлаш", callback_data=f"diesel_rejected_edit|{transfer_id}")])
+    rows.append([InlineKeyboardButton("❌ Отмен", callback_data=f"diesel_rejected_cancel|{transfer_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def diesel_pending_sender_view_keyboard(transfer_id, has_media=True):
+    rows = []
+    if has_media:
+        rows.append([InlineKeyboardButton("👁 Кўриш", callback_data=f"znotif_diesel_pending_media|{transfer_id}")])
+    return InlineKeyboardMarkup(rows)
 
 def other_diesel_card_text(context, status="------"):
     return (
@@ -4201,6 +4362,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     context.user_data["inline_disabled_by_start"] = False
     mode = context.user_data.get("mode")
+    # === V68: Заправшик дизел уведомлениясида Орқага ===
+    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode in [
+        "zapravshik_diesel_notifications_rejected",
+        "zapravshik_diesel_notifications_pending",
+    ]:
+        await clear_all_inline_messages(context, update.effective_chat.id)
+        context.user_data["mode"] = "zapravshik_diesel_notifications"
+        await update.message.reply_text(
+            "🔔 Дизел уведомления",
+            reply_markup=zapravshik_diesel_notifications_keyboard()
+        )
+        return
+
+    if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode == "zapravshik_diesel_notifications":
+        await clear_all_inline_messages(context, update.effective_chat.id)
+        context.user_data["mode"] = "zapravshik_diesel_menu"
+        await update.message.reply_text("🟡 Дизел бўлими", reply_markup=zapravshik_diesel_menu_keyboard())
+        return
+
 
     if text == "⬅️ Орқага" and get_role(update) == "zapravshik" and mode == "zapravshik_diesel_menu":
         context.user_data.clear()
@@ -4372,6 +4552,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
             context.user_data["mode"] = "zapravshik_diesel_menu"
             await update.message.reply_text("🟡 Дизел бўлими", reply_markup=zapravshik_diesel_menu_keyboard())
+            return
+
+        if text == "🔔 Уведомления":
+            context.user_data.clear()
+            context.user_data["mode"] = "zapravshik_diesel_notifications"
+            await update.message.reply_text(
+                "🔔 Дизел уведомления",
+                reply_markup=zapravshik_diesel_notifications_keyboard()
+            )
+            return
+
+        if text == "📩 Приход/Расход хабарлари":
+            context.user_data["mode"] = "zapravshik_diesel_notifications_rejected"
+            await update.message.reply_text(
+                "📩 Рад этилган приход ва расход хабарлари:",
+                reply_markup=only_back_keyboard()
+            )
+            msg = await update.message.reply_text(
+                "Рўйхатдан маълумотни танланг:",
+                reply_markup=zapravshik_rejected_diesel_notifications_keyboard(update.effective_user.id)
+            )
+            remember_inline_message(context, msg)
+            return
+
+        if text == "⏳ Тасдиқлаш ҳолати":
+            context.user_data["mode"] = "zapravshik_diesel_notifications_pending"
+            await update.message.reply_text(
+                "⏳ Текширувда турган приход ва расход хабарлари:",
+                reply_markup=only_back_keyboard()
+            )
+            msg = await update.message.reply_text(
+                "Рўйхатдан маълумотни танланг:",
+                reply_markup=zapravshik_pending_diesel_notifications_keyboard(update.effective_user.id)
+            )
+            remember_inline_message(context, msg)
             return
 
         if text.startswith("📦 Бошқа дизел расходлар"):
