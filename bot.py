@@ -3067,6 +3067,7 @@ def build_zapravshik_diesel_report_file():
         "Сана",
         "Фирма номи",
         "Литр",
+        "Спидометр/моточас",
         "Ким томонидан берилган",
         "Ким томонидан олинган",
         "Ким тасдиқлаган",
@@ -3081,6 +3082,7 @@ def build_zapravshik_diesel_report_file():
             dt.created_at,
             dt.firm,
             dt.liter,
+            dt.speedometer_photo_id,
             dt.from_driver_id,
             dt.from_car,
             fd.name,
@@ -3103,7 +3105,7 @@ def build_zapravshik_diesel_report_file():
 
     for row in cursor.fetchall():
         (
-            created_at, firm, liter,
+            created_at, firm, liter, speedometer_value,
             from_driver_id, from_car, fd_name, fd_surname,
             to_driver_id, to_car, td_name, td_surname,
             approved_by_id, ab_name, ab_surname,
@@ -3128,6 +3130,7 @@ def build_zapravshik_diesel_report_file():
             _report_date(created_at),
             firm or "",
             liter or "",
+            speedometer_value or "",
             giver,
             receiver,
             approved_by,
@@ -3162,6 +3165,7 @@ def build_zapravshik_diesel_report_file():
             _report_date(created_at),
             firm or "",
             liter or "",
+            "",
             giver,
             "Заправка омбори",
             approved_by,
@@ -3656,7 +3660,7 @@ def diesel_give_edit_keyboard():
         [InlineKeyboardButton("🚛 Техникани ўзгартириш", callback_data="diesel_edit_car")],
         [InlineKeyboardButton("⛽ Литр", callback_data="diesel_edit_liter")],
         [InlineKeyboardButton("📝 Изоҳ", callback_data="diesel_edit_note")],
-        [InlineKeyboardButton("📸 Спидометр/моточас расми", callback_data="diesel_edit_speed_photo")],
+        [InlineKeyboardButton("📍 Спидометр/моточас кўрсаткичи", callback_data="diesel_edit_speed_photo")],
         [InlineKeyboardButton("🎥 Видео", callback_data="diesel_edit_video")]
     ])
 
@@ -3750,7 +3754,7 @@ def diesel_confirm_text(context):
         f"⛽ Литр: {context.user_data.get('dieselgive_liter')}\n"
         f"📝 Изоҳ: {context.user_data.get('dieselgive_note')}\n"
         "📌 Статус: Юборишга тайёр\n"
-        "📸 Спидометр/моточас расми: сақланди ✅\n"
+        f"📍 Спидометр/моточас: {context.user_data.get('dieselgive_speedometer_photo_id')}\n"
         "🎥 Видео: сақланди ✅\n\n"
         "Маълумот тўғрими?"
     )
@@ -4265,15 +4269,22 @@ def get_driver_diesel_received_totals(user_id):
 def driver_menu_text(user_id):
     driver_car = get_driver_car(user_id)
     fuel_type = get_car_fuel_type(driver_car)
-    month_liter, total_liter = get_driver_diesel_received_totals(user_id)
 
-    return (
+    text = (
         f"🚚 Ҳайдовчи менюси\n\n"
         f"🚛 Техника: {driver_car}\n"
-        f"⛽ Ёқилғи тури: {fuel_type}\n"
-        f"⛽ Ойлик олинган дизел: {month_liter} л\n"
-        f"⛽ Жами олинган дизел: {total_liter} л"
+        f"⛽ Ёқилғи тури: {fuel_type}"
     )
+
+    # Газлик техника ҳайдовчиларида дизел ойлик/жами қатори кўринмайди.
+    if str(fuel_type or "").strip().lower() == "дизел":
+        month_liter, total_liter = get_driver_diesel_received_totals(user_id)
+        text += (
+            f"\n⛽ Ойлик олинган дизел: {month_liter} л"
+            f"\n⛽ Жами олинган дизел: {total_liter} л"
+        )
+
+    return text
 
 def get_repair_stats(car):
     cursor.execute("""
@@ -6594,8 +6605,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "dieselgive_speed_photo"
 
         await update.message.reply_text(
-            "📸 Спидометр ёки моточас расмини юборинг.\n\n"
-            "❌ Фақат расм қабул қилинади.",
+            "📍 Спидометр ёки моточас кўрсаткичини ёзинг.\n\n"
+            "❌ Фақат сон қабул қилинади.\n"
+            "Мисол: 125000",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    if mode in ["dieselgive_speed_photo", "dieselgive_edit_speed_photo"]:
+        clean_text = str(text or "").strip().replace(" ", "")
+        if not clean_text.isdigit() or not (1 <= len(clean_text) <= 8):
+            await update.message.reply_text(
+                "❌ Нотўғри маълумот киритилди.\n\n"
+                "📍 Спидометр ёки моточас кўрсаткичини фақат сон билан ёзинг.\n"
+                "Мисол: 125000",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+
+        context.user_data["dieselgive_speedometer_photo_id"] = clean_text
+
+        if mode == "dieselgive_edit_speed_photo":
+            context.user_data["mode"] = "dieselgive_confirm"
+            await update.message.reply_text(
+                diesel_confirm_text(context),
+                reply_markup=diesel_give_final_keyboard()
+            )
+            return
+
+        context.user_data["mode"] = "dieselgive_video"
+        await update.message.reply_text(
+            "🎥 Олди-берди қилаётган техникаларни думалоқ видео қилиб юборинг.\n\n"
+            "⏱ Видео 10 сониядан кам бўлмасин.\n"
+            "❌ Фақат думалоқ видео қабул қилинади.",
             reply_markup=ReplyKeyboardRemove()
         )
         return
@@ -10312,8 +10354,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "dieselgive_edit_speed_photo"
 
         await query.message.reply_text(
-            "📸 Янги спидометр ёки моточас расмини юборинг.\n\n"
-            "❌ Фақат расм қабул қилинади.",
+            "📍 Янги спидометр ёки моточас кўрсаткичини ёзинг.\n\n"
+            "❌ Фақат сон қабул қилинади.\n"
+            "Мисол: 125000",
             reply_markup=ReplyKeyboardRemove()
         )
         return
@@ -10327,8 +10370,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "dieselgive_edit_speed_photo"
 
         await query.message.reply_text(
-            "📸 Янги спидометр ёки моточас расмини юборинг.\n\n"
-            "❌ Фақат расм қабул қилинади.",
+            "📍 Янги спидометр ёки моточас кўрсаткичини ёзинг.\n\n"
+            "❌ Фақат сон қабул қилинади.\n"
+            "Мисол: 125000",
             reply_markup=ReplyKeyboardRemove()
         )
         return
@@ -11058,7 +11102,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
-        media_line = "👁 Кўриш тугмасини босинг — расм/видео очилади." if (speedometer_photo_id or video_id) else "Медиа файл йўқ."
+        media_line = "👁 Кўриш тугмасини босинг — видео очилади." if video_id else "Видео файл йўқ."
 
         text = (
             "⛽ ДИЗЕЛ МАЪЛУМОТИ\n\n"
@@ -11067,6 +11111,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Сана: {created_text}\n"
             f"Фирма: {firm}\n"
             f"Литр: {liter} л\n"
+            f"📍 Спидометр/моточас: {speedometer_photo_id or 'Киритилмаган'}\n"
             f"Изоҳ: {note or ''}\n"
             f"Статус: {diesel_status_display(status)}\n\n"
             f"{media_line}\n\n"
@@ -11117,21 +11162,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{diesel_sender_line(from_car, from_driver_id=from_driver_id)}\n"
             f"🚛 Дизел олган техника: {to_car}\n"
             f"⛽ Литр: {liter}\n"
+            f"📍 Спидометр/моточас: {speedometer_photo_id or 'Киритилмаган'}\n"
             f"📝 Изоҳ: {note}\n"
             f"📌 Статус: {diesel_status_display(status)}\n\n"
             "Маълумот тўғрими?"
         )
 
         await query.message.chat.send_message(text)
-
-        if speedometer_photo_id:
-            try:
-                await context.bot.send_photo(
-                    chat_id=query.message.chat_id,
-                    photo=speedometer_photo_id
-                )
-            except Exception as e:
-                print("DIESEL SPEEDOMETER PHOTO SEND ERROR:", e)
 
         if video_id:
             try:
@@ -12348,21 +12385,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode in ["dieselgive_speed_photo", "dieselgive_edit_speed_photo"]:
-        context.user_data["dieselgive_speedometer_photo_id"] = update.message.photo[-1].file_id
-
-        if mode == "dieselgive_edit_speed_photo":
-            context.user_data["mode"] = "dieselgive_confirm"
-            await update.message.reply_text(
-                diesel_confirm_text(context),
-                reply_markup=diesel_give_final_keyboard()
-            )
-            return
-
-        context.user_data["mode"] = "dieselgive_video"
         await update.message.reply_text(
-            "🎥 Олди-берди қилаётган техникаларни думалоқ видео қилиб юборинг.\n\n"
-            "⏱ Видео 10 сониядан кам бўлмасин.\n"
-            "❌ Фақат думалоқ видео қабул қилинади.",
+            "❌ Бу босқичда расм қабул қилинмайди.\n\n"
+            "📍 Спидометр ёки моточас кўрсаткичини фақат сон билан ёзинг.\n"
+            "Мисол: 125000",
             reply_markup=ReplyKeyboardRemove()
         )
         return
@@ -12568,7 +12594,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode in ["dieselgive_speed_photo", "dieselgive_edit_speed_photo"]:
         await update.message.reply_text(
             "❌ Нотўғри маълумот киритилди.\n\n"
-            "📸 Спидометр ёки моточас расмини фақат расм кўринишида юборинг.",
+            "📍 Спидометр ёки моточас кўрсаткичини фақат сон билан ёзинг.\n"
+            "Мисол: 125000",
             reply_markup=ReplyKeyboardRemove()
         )
         return
