@@ -4266,6 +4266,39 @@ def get_driver_diesel_received_totals(user_id):
         return (0, 0)
 
 
+def get_driver_diesel_given_monthly(user_id):
+    """Ҳайдовчи ой давомида берган дизел.
+    Фақат status='Тасдиқланди' бўлган дизеллар ҳисобланади.
+    """
+    cache_key = f"driver:diesel_given_monthly:{int(user_id)}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        cursor.execute("""
+            SELECT COALESCE(SUM(
+                CASE WHEN COALESCE(liter, '') ~ '^[0-9]+$' THEN liter::INTEGER ELSE 0 END
+            ), 0)
+            FROM diesel_transfers
+            WHERE from_driver_id = %s
+              AND status = 'Тасдиқланди'
+              AND created_at >= date_trunc('month', NOW())
+        """, (int(user_id),))
+
+        row = cursor.fetchone()
+        result = int(row[0] or 0) if row else 0
+        return cache_set(cache_key, result)
+
+    except Exception as e:
+        print("GET DRIVER DIESEL GIVEN MONTHLY ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return 0
+
+
 def driver_menu_text(user_id):
     driver_car = get_driver_car(user_id)
     fuel_type = get_car_fuel_type(driver_car)
@@ -4276,12 +4309,13 @@ def driver_menu_text(user_id):
         f"⛽ Ёқилғи тури: {fuel_type}"
     )
 
-    # Газлик техника ҳайдовчиларида дизел ойлик/жами қатори кўринмайди.
+    # Газлик техника ҳайдовчиларида дизел ойлик/берилган қатори кўринмайди.
     if str(fuel_type or "").strip().lower() == "дизел":
-        month_liter, total_liter = get_driver_diesel_received_totals(user_id)
+        month_received_liter, _ = get_driver_diesel_received_totals(user_id)
+        month_given_liter = get_driver_diesel_given_monthly(user_id)
         text += (
-            f"\n⛽ Ойлик олинган дизел: {month_liter} л"
-            f"\n⛽ Жами олинган дизел: {total_liter} л"
+            f"\n⛽ Ойлик олинган дизел: {month_received_liter} л"
+            f"\n⛽ Ойлик берилган дизел: {month_given_liter} л"
         )
 
     return text
