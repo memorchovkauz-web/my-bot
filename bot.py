@@ -1554,6 +1554,84 @@ def delete_driver_from_google_sheet(telegram_id):
         return False
 
 
+def sync_car_status_to_google_sheet(car_number, status):
+    """SQL cars.status ўзгарса, MASHINALAR листидаги status ҳам янгиланади.
+    MASHINALAR структураси: B = car_number, G = status.
+    Google Sheets хатоси ботни тўхтатмаслиги керак.
+    """
+    try:
+        if not car_number:
+            return False
+
+        rows = mashina_ws.get_all_values()
+        target = str(car_number).strip().lower()
+
+        for idx, row in enumerate(rows, start=1):
+            if len(row) > 1 and str(row[1]).strip().lower() == target:
+                mashina_ws.update_cell(idx, 7, status or "")
+                return True
+
+        return False
+    except Exception as e:
+        print("SYNC CAR STATUS TO SHEET ERROR:", e)
+        return False
+
+
+def sync_driver_to_google_sheet(driver_id=None, telegram_id=None):
+    """SQL drivers маълумоти ўзгарса, DRIVERS листидаги шу ходим қатори ҳам янгиланади.
+    DRIVERS структураси: A telegram_id, B name, C surname, D phone, E firm, F car, G status, H date, I work_role.
+    Google Sheets хатоси ботни тўхтатмаслиги керак.
+    """
+    try:
+        if driver_id is not None:
+            cursor.execute("""
+                SELECT telegram_id, name, surname, phone, firm, car, status, COALESCE(work_role, 'driver')
+                FROM drivers
+                WHERE id = %s
+                LIMIT 1
+            """, (int(driver_id),))
+        elif telegram_id is not None:
+            cursor.execute("""
+                SELECT telegram_id, name, surname, phone, firm, car, status, COALESCE(work_role, 'driver')
+                FROM drivers
+                WHERE telegram_id = %s
+                LIMIT 1
+            """, (int(telegram_id),))
+        else:
+            return False
+
+        db_row = cursor.fetchone()
+        if not db_row:
+            return False
+
+        tg_id, name, surname, phone, firm, car, status, work_role = db_row
+        sheet_row = [
+            tg_id or "",
+            name or "",
+            surname or "",
+            phone or "",
+            firm or "",
+            car or "",
+            status or "",
+            now_text(),
+            work_role or "driver",
+        ]
+
+        rows = drivers_ws.get_all_values()
+        target = str(tg_id).strip()
+
+        for idx, row in enumerate(rows, start=1):
+            if len(row) > 0 and str(row[0]).strip() == target:
+                drivers_ws.update(f"A{idx}:I{idx}", [sheet_row])
+                return True
+
+        drivers_ws.append_row(sheet_row)
+        return True
+    except Exception as e:
+        print("SYNC DRIVER TO SHEET ERROR:", e)
+        return False
+
+
 async def clear_blocked_user_bot_messages(context, telegram_id):
     try:
         # Бот юборган охирги маълум inline/хабарларни ўчиришга ҳаракат қилади.
@@ -1905,6 +1983,7 @@ def technadzor_normalize_staff_fields_for_role(driver_id, work_role):
                 (work_role, int(driver_id))
             )
         conn.commit()
+        sync_driver_to_google_sheet(driver_id=driver_id)
         return True
     except Exception as e:
         print("TECHNADZOR NORMALIZE ROLE FIELDS ERROR:", e)
@@ -4202,6 +4281,8 @@ def update_car_status(car, status):
         """, (status, car))
 
         conn.commit()
+        clear_car_cache()
+        sync_car_status_to_google_sheet(car, status)
         return True
 
     except Exception as e:
@@ -4223,6 +4304,7 @@ def update_car_status(car, status):
 
             conn.commit()
             clear_car_cache()
+            sync_car_status_to_google_sheet(car, status)
             return True
 
         except Exception as e2:
@@ -5076,7 +5158,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await maintenance_guard(update, context):
         return
 
-    if get_role(update) == "technadzor":
+    # V22: /start босилганда текширувчи, механик, заправщик ва ҳайдовчида
+    # юқорида қолган эски inline кнопкалар хавфсиз ўчирилади.
+    # Муҳим: clear user_data'дан ОЛДИН, чунки inline message_id'лар user_data'да сақланади.
+    if get_role(update) in ["technadzor", "mechanic", "zapravshik", "driver"]:
         await clear_all_inline_messages(context, update.effective_chat.id)
 
     context.user_data.clear()
@@ -5328,8 +5413,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
     current_role = get_role(update)
 
-    # === V77: Заправшик ва дизел ҳайдовчи меню алмашганда юқоридаги inline кнопкалар ўчсин ===
-    if current_role in ["zapravshik", "driver"] and text in [
+    # === V22: Заправшик, ҳайдовчи, механик ва текширувчи меню алмашганда
+    # юқоридаги эски inline кнопкалар хавфсиз ўчсин ===
+    if current_role in ["zapravshik", "driver", "mechanic", "technadzor"] and text in [
         "⛽ Ёқилғи ҳисоботи",
         "✅ ДИЗЕЛ олишни тасдиқлаш",
         "⛽ ДИЗЕЛ бериш",
@@ -5342,6 +5428,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📩 Приход/Расход хабарлари",
         "⏳ Тасдиқлаш ҳолати",
         "⬅️ Орқага",
+        "🔧 Механик менюси",
+        "🧑‍🔍 Текширувчи менюси",
+        "🚚 Ҳайдовчилар",
+        "🔧 Механиклар",
+        "⛽ Заправщик",
+        "📋 Текширувдаги ходимлар",
+        "👥 Ходимлар",
+        "📋 Текшириш",
+        "🚗 Ремонтга киритиш",
+        "🚗 Ремонтдан чиқариш",
+        "📜 Тарих",
     ]:
         await clear_all_inline_messages(context, update.effective_chat.id)
 
@@ -7404,6 +7501,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cursor.execute(f"UPDATE drivers SET {column} = %s WHERE id = %s", (clean_text, int(driver_id)))
             conn.commit()
+            sync_driver_to_google_sheet(driver_id=driver_id)
         except Exception as e:
             print("TECHNADZOR STAFF NAME UPDATE ERROR:", e)
             await update.message.reply_text("❌ Сақлашда хато.", reply_markup=technadzor_staff_back_reply_keyboard())
@@ -7437,6 +7535,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cursor.execute("UPDATE drivers SET phone = %s WHERE id = %s", (phone, int(driver_id)))
             conn.commit()
+            sync_driver_to_google_sheet(driver_id=driver_id)
         except Exception as e:
             print("TECHNADZOR STAFF PHONE UPDATE ERROR:", e)
             await update.message.reply_text("❌ Сақлашда хато.", reply_markup=technadzor_staff_back_reply_keyboard())
@@ -7519,6 +7618,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ("mechanic", text, int(driver_id))
                 )
             conn.commit()
+            sync_driver_to_google_sheet(driver_id=driver_id)
         except Exception as e:
             print("TECHNADZOR STAFF FIRM UPDATE ERROR:", e)
             await update.message.reply_text("❌ Сақлашда хато.", reply_markup=technadzor_staff_back_reply_keyboard())
@@ -7569,6 +7669,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cursor.execute("UPDATE drivers SET work_role = %s, car = %s WHERE id = %s", ("driver", car_number, int(driver_id)))
             conn.commit()
+            sync_driver_to_google_sheet(driver_id=driver_id)
         except Exception as e:
             print("TECHNADZOR STAFF CAR UPDATE ERROR:", e)
             await update.message.reply_text("❌ Сақлашда хато.", reply_markup=technadzor_staff_back_reply_keyboard())
@@ -8532,7 +8633,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         technadzor_clear_pending_edit_backup(context, driver_id)
         technadzor_pending_decision_done(context, driver_id)
-        sync_driver_status_to_sheet(staff.get("telegram_id"), new_status)
+        sync_driver_to_google_sheet(driver_id=driver_id)
         await notify_registered_employee(context, staff.get("telegram_id"), new_status, staff.get("work_role", "driver"))
 
         try:
@@ -8732,6 +8833,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if driver_id:
                 cursor.execute("UPDATE drivers SET car = %s WHERE telegram_id = %s", (car, driver_id))
                 conn.commit()
+                sync_driver_to_google_sheet(telegram_id=driver_id)
             context.user_data["mode"] = "technadzor_staff_card"
             await query.message.reply_text("✅ Техника ўзгартирилди.")
             return
@@ -9110,7 +9212,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cursor.execute("UPDATE drivers SET status = %s WHERE id = %s", (new_status, int(driver_id)))
             conn.commit()
-            update_driver_status_in_google_sheet(telegram_id, new_status)
+            sync_driver_to_google_sheet(driver_id=driver_id)
         except Exception as e:
             print("TECHNADZOR STAFF STATUS UPDATE ERROR:", e)
             await query.answer("❌ Сақлашда хато.", show_alert=True)
