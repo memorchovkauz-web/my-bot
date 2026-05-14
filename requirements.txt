@@ -1,4 +1,4 @@
 python-telegram-bot[webhooks,job-queue]==20.7
-gspread
-google-auth
+gspread==6.0.2
+google-auth==2.29.0
 psycopg2-binary==2.9.9
