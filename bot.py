@@ -46,6 +46,46 @@ logging.basicConfig(
 logger = logging.getLogger("autobaza-bot")
 
 
+# ================= MAINTENANCE / DEPLOY MODE =================
+# Deploy пайтида user'ларга тушунарли хабар бериш учун.
+# ENV: MAINTENANCE_MODE=true бўлса, бот асосий flow'ларни тўхтатиб,
+# фақат техник янгиланиш хабарини қайтаради.
+# Default false — оддий ишлашга таъсир қилмайди.
+MAINTENANCE_MODE = os.getenv("MAINTENANCE_MODE", "false").strip().lower() in ("1", "true", "yes", "on")
+
+MAINTENANCE_TEXT = (
+    "⚙️ Ботда техник янгиланиш кетмоқда.\n\n"
+    "Илтимос, 1 дақиқадан кейин қайта уриниб кўринг."
+)
+
+
+async def maintenance_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Deploy mode ёқилганда callback/message/photo/video/contact flow'ларни хавфсиз тўхтатади."""
+    if not MAINTENANCE_MODE:
+        return False
+
+    try:
+        if update.callback_query:
+            try:
+                await update.callback_query.answer("⚙️ Техник янгиланиш кетмоқда", show_alert=False)
+            except Exception:
+                pass
+
+            if update.callback_query.message:
+                await update.callback_query.message.reply_text(MAINTENANCE_TEXT)
+            return True
+
+        if update.effective_message:
+            await update.effective_message.reply_text(MAINTENANCE_TEXT)
+            return True
+
+    except Exception:
+        logger.exception("MAINTENANCE GUARD ERROR")
+        return True
+
+    return True
+
+
 # ================= KEEP ALIVE + WEBHOOK SERVER v10 =================
 # Render Web Service free plan portни тез кўриши учун HTTP server
 # DB/Google Sheets оғир инициализациясидан ОЛДИН старт бўлади.
@@ -5033,6 +5073,9 @@ async def v57_check_inactivity(update, context):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await maintenance_guard(update, context):
+        return
+
     if get_role(update) == "technadzor":
         await clear_all_inline_messages(context, update.effective_chat.id)
 
@@ -5271,6 +5314,9 @@ async def show_driver_confirm(message, context):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await maintenance_guard(update, context):
+        return
+
     if not update.message or not update.message.text:
         return
 
@@ -7905,6 +7951,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await maintenance_guard(update, context):
+        return
+
     if await v57_check_inactivity(update, context):
         return
 
@@ -11845,6 +11894,9 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await maintenance_guard(update, context):
+        return
+
     mode = context.user_data.get("mode")
 
     if mode in ["diesel_prihod_liter", "diesel_prihod_note", "diesel_prihod_video", "diesel_prihod_edit_liter", "diesel_prihod_edit_note", "diesel_prihod_edit_video", "diesel_prihod_db_edit_liter", "diesel_prihod_db_edit_note", "diesel_prihod_db_edit_video", "diesel_prihod_reject_note"]:
@@ -12046,6 +12098,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await maintenance_guard(update, context):
+        return
+
     mode = context.user_data.get("mode")
 
     if mode in ["diesel_prihod_liter", "diesel_prihod_note", "diesel_prihod_photo", "diesel_prihod_edit_liter", "diesel_prihod_edit_note", "diesel_prihod_edit_photo", "diesel_prihod_db_edit_liter", "diesel_prihod_db_edit_note", "diesel_prihod_db_edit_photo", "diesel_prihod_reject_note"]:
@@ -12374,6 +12429,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await maintenance_guard(update, context):
+        return
+
     mode = context.user_data.get("mode")
 
     if context.user_data.get("mode") == "gasgive_receiver_reject_note":
