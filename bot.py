@@ -4368,7 +4368,49 @@ def get_driver_diesel_report_counts(user_id):
         return 0, 0
 
 
+def get_driver_gas_report_counts(user_id):
+    """Ҳайдовчи ҳисобот менюси учун тасдиқланган газ приход/расход сонлари."""
+    try:
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM fuel_reports
+            WHERE telegram_id = %s
+              AND LOWER(COALESCE(fuel_type, '')) = LOWER('Газ')
+        """, (int(user_id),))
+        received_row = cursor.fetchone()
+        received_count = int(received_row[0] or 0) if received_row else 0
+
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM gas_transfers
+            WHERE from_driver_id = %s
+              AND status = 'Тасдиқланди'
+        """, (int(user_id),))
+        given_row = cursor.fetchone()
+        given_count = int(given_row[0] or 0) if given_row else 0
+
+        return received_count, given_count
+    except Exception as e:
+        print("DRIVER GAS REPORT COUNTS ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return 0, 0
+
+
 def driver_reports_keyboard(user_id):
+    driver_car = get_driver_car(user_id)
+    fuel_type = str(get_car_fuel_type(driver_car) or "").strip().lower()
+
+    if fuel_type == "газ":
+        gas_received_count, gas_given_count = get_driver_gas_report_counts(user_id)
+        return ReplyKeyboardMarkup([
+            [KeyboardButton(f"📥 Приход ГАЗ маълумотлари (Рўйхатда {gas_received_count} та)")],
+            [KeyboardButton(f"📤 Расход ГАЗ маълумотлари (Рўйхатда {gas_given_count} та)")],
+            [KeyboardButton("⬅️ Орқага")],
+        ], resize_keyboard=True)
+
     received_count, given_count = get_driver_diesel_report_counts(user_id)
     return ReplyKeyboardMarkup([
         [KeyboardButton(f"📥 Приход Дизел маълумотлари (Рўйхатда {received_count} та)")],
@@ -4486,6 +4528,156 @@ def driver_diesel_report_view_keyboard(report_type, transfer_id, has_media=True)
     if has_media:
         buttons.append([InlineKeyboardButton("👁 Кўриш", callback_data=f"driver_diesel_report_view|{report_type}|{transfer_id}")])
     buttons.append([InlineKeyboardButton("⬅️ Орқага", callback_data=f"driver_diesel_report_back|list|{report_type}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+
+def driver_gas_report_list_keyboard(user_id, report_type):
+    """report_type: received | given"""
+    try:
+        if report_type == "received":
+            cursor.execute("""
+                SELECT id, created_at, car, COALESCE(km, '')
+                FROM fuel_reports
+                WHERE telegram_id = %s
+                  AND LOWER(COALESCE(fuel_type, '')) = LOWER('Газ')
+                ORDER BY created_at DESC
+            """, (int(user_id),))
+            rows = cursor.fetchall()
+            keyboard = []
+            for record_id, created_at, car, km in rows:
+                date_text = created_at.strftime("%d.%m") if created_at else "--.--"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{date_text} / {car or '-'} / {km or '-'}",
+                        callback_data=f"driver_gas_report_card|received|{record_id}"
+                    )
+                ])
+        else:
+            cursor.execute("""
+                SELECT id, created_at, from_car, to_car
+                FROM gas_transfers
+                WHERE from_driver_id = %s
+                  AND status = 'Тасдиқланди'
+                ORDER BY created_at DESC
+            """, (int(user_id),))
+            rows = cursor.fetchall()
+            keyboard = []
+            for transfer_id, created_at, from_car, to_car in rows:
+                date_text = created_at.strftime("%d.%m") if created_at else "--.--"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{date_text} / {to_car or '-'}",
+                        callback_data=f"driver_gas_report_card|given|{transfer_id}"
+                    )
+                ])
+    except Exception as e:
+        print("DRIVER GAS REPORT LIST ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        keyboard = []
+
+    if not keyboard:
+        keyboard.append([InlineKeyboardButton("❌ Маълумот топилмади", callback_data="none")])
+
+    keyboard.append([InlineKeyboardButton("⬅️ Орқага", callback_data="driver_gas_report_back|menu")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_driver_gas_received_report_row(record_id):
+    try:
+        cursor.execute("""
+            SELECT id, telegram_id, car, fuel_type, km, video_id, photo_id, created_at
+            FROM fuel_reports
+            WHERE id = %s
+        """, (int(record_id),))
+        return cursor.fetchone()
+    except Exception as e:
+        print("DRIVER GAS RECEIVED REPORT ROW ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None
+
+
+def get_driver_gas_given_report_row(transfer_id):
+    try:
+        cursor.execute("""
+            SELECT
+                from_driver_id,
+                from_car,
+                to_driver_id,
+                to_car,
+                firm,
+                COALESCE(note, ''),
+                video_id,
+                created_at,
+                status,
+                approved_by_id
+            FROM gas_transfers
+            WHERE id = %s
+        """, (int(transfer_id),))
+        return cursor.fetchone()
+    except Exception as e:
+        print("DRIVER GAS GIVEN REPORT ROW ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return None
+
+
+def gas_status_display(status):
+    if status == "Тасдиқланди":
+        return "Тасдиқланган"
+    if status == "Рад этилди":
+        return "Рад этилган"
+    return status or "Киритилмаган"
+
+
+def driver_gas_received_card_text(row):
+    record_id, telegram_id, car, fuel_type, km, video_id, photo_id, created_at = row
+    created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+    return (
+        "📥 ПРИХОД ГАЗ МАЪЛУМОТИ\n\n"
+        f"🕒 Сана: {created_text}\n"
+        f"🚛 Техника: {car or 'Киритилмаган'}\n"
+        f"⛽ Ёқилғи тури: {fuel_type or 'Газ'}\n"
+        f"📍 Спидометр: {km or 'Киритилмаган'}\n"
+        f"🎥 Видео: {'сақланди ✅' if video_id else 'йўқ'}\n"
+        f"📷 Расм: {'сақланди ✅' if photo_id else 'йўқ'}\n"
+        "📌 Статус: Тасдиқланган\n\n"
+        "Маълумотни кўриш учун 👁 Кўриш тугмасини босинг."
+    )
+
+
+def driver_gas_given_card_text(row):
+    from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id, created_at, status, approved_by_id = row
+    created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
+    from_name = get_driver_full_name_by_telegram_id(from_driver_id) if from_driver_id else "Киритилмаган"
+    to_name = get_driver_full_name_by_telegram_id(to_driver_id) if to_driver_id else "Киритилмаган"
+    approved_name = get_driver_full_name_by_telegram_id(approved_by_id) if approved_by_id else "Киритилмаган"
+    return (
+        "📤 РАСХОД ГАЗ МАЪЛУМОТИ\n\n"
+        f"🕒 Сана: {created_text}\n"
+        f"🏢 Фирма номи: {firm or 'Киритилмаган'}\n"
+        f"🚛 Газ берган техника: {from_car or 'Киритилмаган'} — {from_name}\n"
+        f"🚛 Газ олган техника: {to_car or 'Киритилмаган'} — {to_name}\n"
+        f"📝 Изоҳ: {note or ''}\n"
+        f"✅ Ким тасдиқлаган: {approved_name}\n"
+        f"🎥 Видео: {'сақланди ✅' if video_id else 'йўқ'}\n"
+        f"📌 Статус: {gas_status_display(status)}\n\n"
+        "Маълумотни кўриш учун 👁 Кўриш тугмасини босинг."
+    )
+
+
+def driver_gas_report_view_keyboard(report_type, record_id, has_media=True):
+    buttons = []
+    if has_media:
+        buttons.append([InlineKeyboardButton("👁 Кўриш", callback_data=f"driver_gas_report_view|{report_type}|{record_id}")])
     return InlineKeyboardMarkup(buttons)
 
 def driver_menu_text(user_id):
@@ -5920,6 +6112,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📊 Ҳисоботлар",
         "📥 Приход Дизел маълумотлари",
         "📤 Расход Дизел маълумотлари",
+        "📥 Приход ГАЗ маълумотлари",
+        "📤 Расход ГАЗ маълумотлари",
         "✅ ДИЗЕЛ олишни тасдиқлаш",
         "⛽ ДИЗЕЛ бериш",
         "⛽ ГАЗ олиш",
@@ -6961,7 +7155,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    if text == "⬅️ Орқага" and mode in ["driver_reports_received", "driver_reports_given"]:
+    if text == "⬅️ Орқага" and mode in ["driver_reports_received", "driver_reports_given", "driver_reports_gas_received", "driver_reports_gas_given"]:
         await clear_all_inline_messages(context, update.effective_chat.id)
         context.user_data["mode"] = "driver_reports_menu"
         await update.message.reply_text(
@@ -7092,6 +7286,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📤 Расход Дизел маълумотлари ({given_count} та)\n\n"
             "Статуси тасдиқланган дизел расход карточкалари:",
             reply_markup=driver_diesel_report_list_keyboard(update.effective_user.id, "given")
+        )
+        remember_inline_message(context, msg)
+        return
+
+    if text.startswith("📥 Приход ГАЗ маълумотлари"):
+        if current_role != "driver":
+            await update.message.reply_text("❌ Бу меню фақат ҳайдовчи роли учун.")
+            return
+
+        await clear_all_inline_messages(context, update.effective_chat.id)
+        context.user_data["mode"] = "driver_reports_gas_received"
+        received_count, _ = get_driver_gas_report_counts(update.effective_user.id)
+        await update.message.reply_text(
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=back_keyboard()
+        )
+        msg = await update.message.reply_text(
+            f"📥 Приход ГАЗ маълумотлари ({received_count} та)\n\n"
+            "Статуси тасдиқланган газ приход карточкалари:",
+            reply_markup=driver_gas_report_list_keyboard(update.effective_user.id, "received")
+        )
+        remember_inline_message(context, msg)
+        return
+
+    if text.startswith("📤 Расход ГАЗ маълумотлари"):
+        if current_role != "driver":
+            await update.message.reply_text("❌ Бу меню фақат ҳайдовчи роли учун.")
+            return
+
+        await clear_all_inline_messages(context, update.effective_chat.id)
+        context.user_data["mode"] = "driver_reports_gas_given"
+        _, given_count = get_driver_gas_report_counts(update.effective_user.id)
+        await update.message.reply_text(
+            "⬅️ Орқага қайтиш учун пастдаги тугмани босинг.",
+            reply_markup=back_keyboard()
+        )
+        msg = await update.message.reply_text(
+            f"📤 Расход ГАЗ маълумотлари ({given_count} та)\n\n"
+            "Статуси тасдиқланган газ расход карточкалари:",
+            reply_markup=driver_gas_report_list_keyboard(update.effective_user.id, "given")
         )
         remember_inline_message(context, msg)
         return
@@ -8843,6 +9077,142 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_video_note(chat_id=query.message.chat_id, video_note=video_id)
             except Exception:
                 await safe_send_video(context.bot, query.message.chat_id, video_id)
+        return
+
+
+    if data.startswith("driver_gas_report_back|"):
+        parts = data.split("|")
+        back_target = parts[1] if len(parts) > 1 else "menu"
+
+        if back_target == "menu":
+            context.user_data["mode"] = "driver_reports_menu"
+            try:
+                await query.edit_message_text(
+                    "📊 Ҳисоботлар менюси\n\nКеракли бўлимни танланг:"
+                )
+            except Exception:
+                pass
+            try:
+                await query.message.reply_text(
+                    "📊 Ҳисоботлар менюси\n\nКеракли бўлимни танланг:",
+                    reply_markup=driver_reports_keyboard(update.effective_user.id)
+                )
+            except Exception:
+                pass
+            return
+
+    if data.startswith("driver_gas_report_card|"):
+        try:
+            _, report_type, record_id = data.split("|", 2)
+        except ValueError:
+            await query.message.reply_text("❌ Нотўғри callback маълумоти.")
+            return
+
+        user_id = int(update.effective_user.id)
+
+        if report_type == "received":
+            row = get_driver_gas_received_report_row(record_id)
+            if not row:
+                await query.message.reply_text("❌ Маълумот топилмади.")
+                return
+            _, telegram_id, car, fuel_type, km, video_id, photo_id, created_at = row
+            if int(telegram_id or 0) != user_id:
+                await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+                return
+            card_text = driver_gas_received_card_text(row)
+            has_media = bool(video_id or photo_id)
+        else:
+            row = get_driver_gas_given_report_row(record_id)
+            if not row:
+                await query.message.reply_text("❌ Маълумот топилмади.")
+                return
+            from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id, created_at, status, approved_by_id = row
+            if status != "Тасдиқланди":
+                await query.message.reply_text("❌ Бу маълумот тасдиқланмаган.")
+                return
+            if int(from_driver_id or 0) != user_id:
+                await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+                return
+            card_text = driver_gas_given_card_text(row)
+            has_media = bool(video_id)
+
+        try:
+            await query.edit_message_text(
+                card_text,
+                reply_markup=driver_gas_report_view_keyboard(report_type, record_id, has_media=has_media)
+            )
+            remember_inline_message(context, query.message)
+        except Exception:
+            msg = await query.message.reply_text(
+                card_text,
+                reply_markup=driver_gas_report_view_keyboard(report_type, record_id, has_media=has_media)
+            )
+            remember_inline_message(context, msg)
+        return
+
+    if data.startswith("driver_gas_report_view|"):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        try:
+            _, report_type, record_id = data.split("|", 2)
+        except ValueError:
+            await query.message.reply_text("❌ Нотўғри callback маълумоти.")
+            return
+
+        user_id = int(update.effective_user.id)
+
+        if report_type == "received":
+            row = get_driver_gas_received_report_row(record_id)
+            if not row:
+                await query.message.reply_text("❌ Маълумот топилмади.")
+                return
+            _, telegram_id, car, fuel_type, km, video_id, photo_id, created_at = row
+            if int(telegram_id or 0) != user_id:
+                await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+                return
+            card_text = driver_gas_received_card_text(row)
+            media_video_id = video_id
+            media_photo_id = photo_id
+        else:
+            row = get_driver_gas_given_report_row(record_id)
+            if not row:
+                await query.message.reply_text("❌ Маълумот топилмади.")
+                return
+            from_driver_id, from_car, to_driver_id, to_car, firm, note, video_id, created_at, status, approved_by_id = row
+            if status != "Тасдиқланди":
+                await query.message.reply_text("❌ Бу маълумот тасдиқланмаган.")
+                return
+            if int(from_driver_id or 0) != user_id:
+                await query.message.reply_text("❌ Бу маълумот сиз учун эмас.")
+                return
+            card_text = driver_gas_given_card_text(row)
+            media_video_id = video_id
+            media_photo_id = None
+
+        try:
+            await query.message.delete()
+        except Exception:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+        await query.message.reply_text(card_text)
+
+        if media_photo_id:
+            try:
+                await context.bot.send_photo(chat_id=query.message.chat_id, photo=media_photo_id)
+            except Exception:
+                pass
+
+        if media_video_id:
+            try:
+                await context.bot.send_video_note(chat_id=query.message.chat_id, video_note=media_video_id)
+            except Exception:
+                await safe_send_video(context.bot, query.message.chat_id, media_video_id)
         return
 
     # === V74: Заправшик уведомления рўйхатидан карточка очиш ===
