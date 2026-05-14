@@ -2091,7 +2091,48 @@ def technadzor_staff_role_reply_keyboard():
     ], resize_keyboard=True)
 
 
-def technadzor_staff_cars_reply_keyboard(firm):
+
+
+SPECIAL_MULTI_DRIVER_CAR_NORM = "30615RBA"
+
+def normalize_car_for_driver_limit(car_number):
+    return re.sub(r"\s+", "", str(car_number or "")).upper()
+
+def get_driver_car_counts_by_firm(firm, exclude_driver_id=None):
+    """Фирма бўйича техникага бириктирилган ҳайдовчилар сони.
+    30 615 RBA учун 2 та ҳайдовчига рухсат берилади, қолган техникага 1 та.
+    """
+    counts = {}
+    try:
+        params = [firm]
+        exclude_sql = ""
+        if exclude_driver_id:
+            exclude_sql = " AND id <> %s"
+            params.append(int(exclude_driver_id))
+
+        cursor.execute(f"""
+            SELECT UPPER(REPLACE(COALESCE(car, ''), ' ', '')) AS car_norm, COUNT(*)
+            FROM drivers
+            WHERE firm = %s
+              AND COALESCE(work_role, 'driver') = 'driver'
+              AND COALESCE(car, '') <> ''
+              AND COALESCE(status, '') <> 'Рад этилди'
+              {exclude_sql}
+            GROUP BY UPPER(REPLACE(COALESCE(car, ''), ' ', ''))
+        """, tuple(params))
+        counts = {row[0]: int(row[1]) for row in cursor.fetchall() if row and row[0]}
+    except Exception as e:
+        print("GET DRIVER CAR COUNTS ERROR:", e)
+    return counts
+
+def is_car_available_for_driver(car_number, counts):
+    car_norm = normalize_car_for_driver_limit(car_number)
+    used_count = counts.get(car_norm, 0)
+    if car_norm == SPECIAL_MULTI_DRIVER_CAR_NORM:
+        return used_count < 2
+    return used_count == 0
+
+def technadzor_staff_cars_reply_keyboard(firm, exclude_driver_id=None):
     try:
         cursor.execute("""
             SELECT car_number
@@ -2099,7 +2140,9 @@ def technadzor_staff_cars_reply_keyboard(firm):
             WHERE firm = %s
             ORDER BY car_number
         """, (firm,))
-        cars = [row[0] for row in cursor.fetchall() if row[0]]
+        all_cars = [row[0] for row in cursor.fetchall() if row[0]]
+        counts = get_driver_car_counts_by_firm(firm, exclude_driver_id=exclude_driver_id)
+        cars = [car for car in all_cars if is_car_available_for_driver(car, counts)]
     except Exception as e:
         print("TECHNADZOR STAFF CARS REPLY ERROR:", e)
         cars = []
@@ -4546,8 +4589,9 @@ def history_car_buttons_by_firm(firm):
     return InlineKeyboardMarkup(keyboard)
 
 
-def car_buttons_by_firm(firm):
+def car_buttons_by_firm(firm, only_available_for_driver=False, exclude_driver_id=None):
     rows_for_buttons = []
+    driver_car_counts = get_driver_car_counts_by_firm(firm, exclude_driver_id=exclude_driver_id) if only_available_for_driver else {}
 
     for row in get_all_cars():
         if len(row) < 7:
@@ -4559,6 +4603,8 @@ def car_buttons_by_firm(firm):
         holat = row[6].strip()
 
         if firm_name.lower() == firm.strip().lower():
+            if only_available_for_driver and not is_car_available_for_driver(car, driver_car_counts):
+                continue
             order = STATUS_ORDER.get(holat.lower(), 99)
             rows_for_buttons.append((order, car, turi, holat))
 
@@ -5986,7 +6032,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             f"🏢 Фирма: {text}\n\n🚛 Техникани танланг:",
-            reply_markup=car_buttons_by_firm(text)
+            reply_markup=car_buttons_by_firm(text, only_available_for_driver=True)
         )
         return
 
@@ -7467,7 +7513,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "🚛 Қайси техника ҳайдовчисисиз?",
-            reply_markup=car_buttons_by_firm(text)
+            reply_markup=car_buttons_by_firm(text, only_available_for_driver=True)
         )
         return
 
@@ -7497,7 +7543,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             f"🏢 Янги фирма: {text}\n\n🚛 Энди техникани қайта танланг:",
-            reply_markup=car_buttons_by_firm(text)
+            reply_markup=car_buttons_by_firm(text, only_available_for_driver=True)
         )
         return
 
@@ -8209,7 +8255,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["mode"] = "technadzor_staff_edit_car"
             await update.message.reply_text(
                 "✅ Фирма ўзгарди. Энди шу фирма техникани танланг:",
-                reply_markup=technadzor_staff_cars_reply_keyboard(text)
+                reply_markup=technadzor_staff_cars_reply_keyboard(text, exclude_driver_id=driver_id)
             )
             return
 
@@ -8243,7 +8289,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             row = None
 
         if not row:
-            await update.message.reply_text("❌ Техникани пастки менюдан танланг.", reply_markup=technadzor_staff_cars_reply_keyboard(firm))
+            await update.message.reply_text("❌ Техникани пастки менюдан танланг.", reply_markup=technadzor_staff_cars_reply_keyboard(firm, exclude_driver_id=driver_id))
             return
 
         car_number = row[0]
@@ -9451,7 +9497,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["mode"] = "driver_edit_car"
             await query.message.reply_text(
                 "🚛 Янги техникани танланг:",
-                reply_markup=car_buttons_by_firm(firm)
+                reply_markup=car_buttons_by_firm(firm, only_available_for_driver=True)
             )
             return
 
@@ -9533,6 +9579,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # REGISTRATION / REGISTRATION EDIT CAR
         if mode in ["driver_car", "driver_edit_car"]:
+            firm = context.user_data.get("driver_firm")
+            counts = get_driver_car_counts_by_firm(firm) if firm else {}
+            if not is_car_available_for_driver(car, counts):
+                await query.answer("❌ Бу техникага ҳайдовчи бириктирилган.", show_alert=True)
+                await query.message.reply_text(
+                    "❌ Бу техникага ҳайдовчи бириктирилган. Илтимос, бошқа техникани танланг.",
+                    reply_markup=car_buttons_by_firm(firm, only_available_for_driver=True)
+                )
+                return
+
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
@@ -9861,7 +9917,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["mode"] = "technadzor_staff_edit_firm"
                 return
             context.user_data["mode"] = "technadzor_staff_edit_car"
-            await query.message.reply_text("🚛 Янги техникани танланг:", reply_markup=technadzor_staff_cars_reply_keyboard(firm))
+            await query.message.reply_text("🚛 Янги техникани танланг:", reply_markup=technadzor_staff_cars_reply_keyboard(firm, exclude_driver_id=driver_id))
             return
 
     if data.startswith("tz_staff_delete|"):
@@ -12320,7 +12376,7 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             context.user_data["mode"] = "driver_edit_car"
             await query.message.reply_text(
                 "🚛 Янги техникани танланг:",
-                reply_markup=car_buttons_by_firm(firm)
+                reply_markup=car_buttons_by_firm(firm, only_available_for_driver=True)
             )
             return
 
