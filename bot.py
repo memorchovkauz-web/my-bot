@@ -2,9 +2,13 @@ import os
 import json
 import re
 import time
+import logging
+import traceback
 import threading
 import asyncio
 import psycopg2
+from psycopg2.pool import ThreadedConnectionPool
+import contextvars
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,11 +37,28 @@ from telegram.error import BadRequest
 
 TOKEN = os.getenv("BOT_TOKEN")
 
+# ================= V20 ERROR LOGGING =================
+# Production log: Render Logs'да хатони аниқ кўриш учун.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+logger = logging.getLogger("autobaza-bot")
+
+
 # ================= KEEP ALIVE + WEBHOOK SERVER v10 =================
 # Render Web Service free plan portни тез кўриши учун HTTP server
 # DB/Google Sheets оғир инициализациясидан ОЛДИН старт бўлади.
 # Бу блок bot flow, callback, DB status ва меню структурасига тегмайди.
 MAIN_LOOP = None
+
+
+def log_webhook_future_exception(future):
+    """Webhook thread ичида process_update exception бўлса, ботни йиқитмасдан log қилади."""
+    try:
+        future.result()
+    except Exception:
+        logger.exception("WEBHOOK PROCESS_UPDATE ERROR")
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -86,10 +107,11 @@ class Handler(BaseHTTPRequestHandler):
             update_data = json.loads(raw_body.decode("utf-8"))
             telegram_update = Update.de_json(update_data, app.bot)
 
-            asyncio.run_coroutine_threadsafe(
+            future = asyncio.run_coroutine_threadsafe(
                 app.process_update(telegram_update),
                 MAIN_LOOP
             )
+            future.add_done_callback(log_webhook_future_exception)
 
             self.send_response(200)
             self.send_header("Content-type", "text/plain")
@@ -97,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"OK")
             return
         except Exception as e:
-            print("WEBHOOK POST ERROR:", e)
+            logger.exception("WEBHOOK POST ERROR")
             self.send_response(200)
             self.send_header("Content-type", "text/plain")
             self.end_headers()
@@ -118,7 +140,149 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 TASHKENT_TZ = ZoneInfo("Asia/Tashkent")
 
-conn = psycopg2.connect(DATABASE_URL)
+# ================= DB POOL v17 =================
+# Мақсад: 70-80 user бир вақтда ишлатганда битта global cursor bottleneck бўлмасин.
+# Эски код структураси сақланади: cursor.execute(...), cursor.fetchone(), conn.commit() ишлашда давом этади.
+# Ичкарида ҳар asyncio task учун pool'дан алоҳида connection/cursor берилади.
+DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "1"))
+DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "8"))
+
+_db_pool = None
+_db_conn_var = contextvars.ContextVar("db_conn", default=None)
+_db_cursor_var = contextvars.ContextVar("db_cursor", default=None)
+_db_readonly_var = contextvars.ContextVar("db_readonly", default=False)
+
+def create_db_pool():
+    global _db_pool
+    if _db_pool is None:
+        _db_pool = ThreadedConnectionPool(
+            DB_POOL_MIN,
+            DB_POOL_MAX,
+            DATABASE_URL,
+            options="-c timezone=Asia/Tashkent"
+        )
+    return _db_pool
+
+def reset_db_pool():
+    global _db_pool
+    try:
+        old_pool = _db_pool
+        _db_pool = None
+        if old_pool is not None:
+            old_pool.closeall()
+    except Exception as e:
+        print("DB POOL RESET ERROR:", e)
+    finally:
+        _db_conn_var.set(None)
+        _db_cursor_var.set(None)
+        _db_readonly_var.set(False)
+        create_db_pool()
+
+def _release_db_connection(commit=False, rollback=False):
+    pool = create_db_pool()
+    cur = _db_cursor_var.get()
+    db_conn = _db_conn_var.get()
+
+    if cur is not None:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+    if db_conn is not None:
+        try:
+            if commit:
+                db_conn.commit()
+            elif rollback:
+                db_conn.rollback()
+        except Exception as e:
+            print("DB COMMIT/ROLLBACK ERROR:", e)
+            try:
+                db_conn.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                pool.putconn(db_conn)
+            except Exception:
+                pass
+
+    _db_conn_var.set(None)
+    _db_cursor_var.set(None)
+    _db_readonly_var.set(False)
+
+def _is_readonly_query(query):
+    q = str(query or "").strip().lower()
+    return q.startswith(("select", "with", "show"))
+
+def _get_task_cursor(query=None):
+    cur = _db_cursor_var.get()
+    if cur is not None:
+        return cur
+
+    pool = create_db_pool()
+    db_conn = pool.getconn()
+    cur = db_conn.cursor()
+    _db_conn_var.set(db_conn)
+    _db_cursor_var.set(cur)
+    _db_readonly_var.set(_is_readonly_query(query))
+    return cur
+
+class PooledCursorProxy:
+    def execute(self, query, params=None):
+        cur = _get_task_cursor(query)
+        return cur.execute(query, params or ())
+
+    def fetchone(self):
+        cur = _db_cursor_var.get()
+        if cur is None:
+            return None
+        row = cur.fetchone()
+        if _db_readonly_var.get():
+            _release_db_connection()
+        return row
+
+    def fetchall(self):
+        cur = _db_cursor_var.get()
+        if cur is None:
+            return []
+        rows = cur.fetchall()
+        if _db_readonly_var.get():
+            _release_db_connection()
+        return rows
+
+    def fetchmany(self, size=None):
+        cur = _db_cursor_var.get()
+        if cur is None:
+            return []
+        rows = cur.fetchmany(size) if size is not None else cur.fetchmany()
+        if _db_readonly_var.get():
+            _release_db_connection()
+        return rows
+
+    @property
+    def rowcount(self):
+        cur = _db_cursor_var.get()
+        return cur.rowcount if cur is not None else -1
+
+    @property
+    def description(self):
+        cur = _db_cursor_var.get()
+        return cur.description if cur is not None else None
+
+class PooledConnectionProxy:
+    def cursor(self):
+        return PooledCursorProxy()
+
+    def commit(self):
+        _release_db_connection(commit=True)
+
+    def rollback(self):
+        _release_db_connection(rollback=True)
+
+# Эски код учун global nomlar сақланади.
+create_db_pool()
+conn = PooledConnectionProxy()
 cursor = conn.cursor()
 try:
     cursor.execute("SET TIME ZONE 'Asia/Tashkent'")
@@ -132,7 +296,7 @@ except Exception as e:
 # =====================
 # Қисқа TTL cache: менюларда такрорий SELECT'ларни камайтиради.
 # DB структураси ва callback flow ўзгармайди.
-CACHE_TTL_SECONDS = 30
+CACHE_TTL_SECONDS = 45
 _speed_cache = {}
 
 def cache_get(key):
@@ -710,8 +874,7 @@ def get_driver_status(user_id):
             pass
 
         try:
-            conn = psycopg2.connect(DATABASE_URL)
-            cursor = conn.cursor()
+            reset_db_pool()
 
             cursor.execute("""
                 SELECT status
@@ -1952,6 +2115,8 @@ def get_all_diesel_stock_by_firm_cached():
 def clear_diesel_stock_cache():
     clear_speed_cache("diesel:stock_by_firm:")
     clear_speed_cache("zapravka:info_text")
+    clear_speed_cache("diesel:other_expense_total")
+    clear_speed_cache("keyboard:diesel_prihod_firm_stock")
 
 
 def get_diesel_prihod_sum_by_firm(firm):
@@ -1996,6 +2161,12 @@ def get_diesel_stock_by_firm(firm):
 
 def diesel_prihod_firm_stock_keyboard():
     # Заправшик дизел менюсида фирмалар олдида остатка кўринади.
+    # 45 сониялик cache меню очилишини тезлатади, статус/DB flow'га тегмайди.
+    cache_key = "keyboard:diesel_prihod_firm_stock"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     rows = []
     for firm in FIRM_NAMES:
         _, _, ostatka = get_diesel_stock_by_firm(firm)
@@ -2003,14 +2174,19 @@ def diesel_prihod_firm_stock_keyboard():
 
     rows.append([KeyboardButton(f"📦 Бошқа дизел расходлар [ост:-{format_liter(get_other_diesel_expense_total())} л]")])
     rows.append([KeyboardButton("⬅️ Орқага")])
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    return cache_set(cache_key, ReplyKeyboardMarkup(rows, resize_keyboard=True))
 
 
 def diesel_firm_plain_keyboard():
     # Ҳайдовчи ролида фирмалар олдида остатка кўринмайди.
+    cache_key = "keyboard:diesel_firm_plain"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     rows = [[KeyboardButton(firm)] for firm in FIRM_NAMES]
     rows.append([KeyboardButton("⬅️ Орқага")])
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    return cache_set(cache_key, ReplyKeyboardMarkup(rows, resize_keyboard=True))
 
 
 def extract_firm_from_stock_button(value):
@@ -2019,6 +2195,11 @@ def extract_firm_from_stock_button(value):
 
 
 def get_other_diesel_expense_total():
+    cache_key = "diesel:other_expense_total"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         cursor.execute("""
             SELECT COALESCE(SUM(
@@ -2032,9 +2213,13 @@ def get_other_diesel_expense_total():
             WHERE TRIM(COALESCE(status, '')) = 'Тасдиқланди'
         """)
         row = cursor.fetchone()
-        return float(row[0] or 0)
+        return cache_set(cache_key, float(row[0] or 0))
     except Exception as e:
         print("OTHER DIESEL TOTAL ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return 0.0
 
 
@@ -2091,18 +2276,24 @@ def register_role_keyboard():
 
 
 def zapravshik_main_keyboard():
-    return ReplyKeyboardMarkup([
+    cached = cache_get("keyboard:zapravshik_main")
+    if cached is not None:
+        return cached
+    return cache_set("keyboard:zapravshik_main", ReplyKeyboardMarkup([
         [KeyboardButton("🟡 Дизел бўлими")],
-    ], resize_keyboard=True)
+    ], resize_keyboard=True))
 
 
 def zapravshik_diesel_menu_keyboard():
-    return ReplyKeyboardMarkup([
+    cached = cache_get("keyboard:zapravshik_diesel_menu")
+    if cached is not None:
+        return cached
+    return cache_set("keyboard:zapravshik_diesel_menu", ReplyKeyboardMarkup([
         [KeyboardButton("➕ Дизел приход")],
         [KeyboardButton("➖ Дизел расход")],
         [KeyboardButton("🔔 Уведомления")],
         [KeyboardButton("⬅️ Орқага")],
-    ], resize_keyboard=True)
+    ], resize_keyboard=True))
 
 
 def zapravshik_diesel_notifications_keyboard():
@@ -3909,8 +4100,7 @@ def db_execute(query, params=None):
         except Exception:
             pass
 
-        conn = psycopg2.connect(DATABASE_URL)
-        cursor = conn.cursor()
+        reset_db_pool()
         cursor.execute(query, params or ())
         conn.commit()
 
@@ -3983,8 +4173,7 @@ def update_car_status(car, status):
             pass
 
         try:
-            conn = psycopg2.connect(DATABASE_URL)
-            cursor = conn.cursor()
+            reset_db_pool()
 
             cursor.execute("""
                 UPDATE cars
@@ -12267,7 +12456,23 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
+async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """V20: callback/message ичида хато чиқса, бот тўхтамасин ва Render log'да аниқ кўринсин."""
+    logger.error("UPDATE ERROR: %s", update)
+    logger.error("EXCEPTION:\n%s", "".join(traceback.format_exception(None, context.error, context.error.__traceback__)))
+
+    try:
+        if isinstance(update, Update) and update.effective_message:
+            await update.effective_message.reply_text(
+                "⚠️ Вақтинча техник хатолик бўлди. Илтимос, менюдан қайта уриниб кўринг."
+            )
+    except Exception:
+        logger.exception("ERROR HANDLER USER NOTIFY FAILED")
+
+
 app = ApplicationBuilder().token(TOKEN).build()
+app.add_error_handler(global_error_handler)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("clear", clear_chat))
