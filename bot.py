@@ -4220,6 +4220,61 @@ def get_car_fuel_type(car):
             return row[7].strip()
     return ""
 
+
+
+def get_driver_diesel_received_totals(user_id):
+    """Ҳайдовчи қабул қилган дизел: жорий ой ва умумий жами.
+    Фақат status='Тасдиқланди' бўлган дизеллар ҳисобланади.
+    """
+    cache_key = f"driver:diesel_received_totals:{int(user_id)}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        cursor.execute("""
+            SELECT
+                COALESCE(SUM(
+                    CASE
+                        WHEN created_at >= date_trunc('month', NOW())
+                        THEN CASE WHEN COALESCE(liter, '') ~ '^[0-9]+$' THEN liter::INTEGER ELSE 0 END
+                        ELSE 0
+                    END
+                ), 0) AS month_liter,
+                COALESCE(SUM(
+                    CASE WHEN COALESCE(liter, '') ~ '^[0-9]+$' THEN liter::INTEGER ELSE 0 END
+                ), 0) AS total_liter
+            FROM diesel_transfers
+            WHERE to_driver_id = %s
+              AND status = 'Тасдиқланди'
+        """, (int(user_id),))
+
+        row = cursor.fetchone()
+        result = (int(row[0] or 0), int(row[1] or 0)) if row else (0, 0)
+        return cache_set(cache_key, result)
+
+    except Exception as e:
+        print("GET DRIVER DIESEL RECEIVED TOTALS ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return (0, 0)
+
+
+def driver_menu_text(user_id):
+    driver_car = get_driver_car(user_id)
+    fuel_type = get_car_fuel_type(driver_car)
+    month_liter, total_liter = get_driver_diesel_received_totals(user_id)
+
+    return (
+        f"🚚 Ҳайдовчи менюси\n\n"
+        f"🚛 Техника: {driver_car}\n"
+        f"⛽ Ёқилғи тури: {fuel_type}\n"
+        f"⛽ Ойлик олинган дизел: {month_liter} л\n"
+        f"⛽ Жами олинган дизел: {total_liter} л"
+    )
+
 def get_repair_stats(car):
     cursor.execute("""
         SELECT status
@@ -5418,9 +5473,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fuel_type = get_car_fuel_type(driver_car)
 
             await update.message.reply_text(
-                f"🚚 Ҳайдовчи менюси\n\n"
-                f"🚛 Техника: {driver_car}\n"
-                f"⛽ Ёқилғи тури: {fuel_type}",
+                driver_menu_text(update.effective_user.id),
                 reply_markup=driver_main_keyboard(fuel_type)
             )
             return
@@ -5443,9 +5496,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         driver_car = get_driver_car(update.effective_user.id)
         fuel_type = get_car_fuel_type(driver_car)
         await update.message.reply_text(
-            f"🚚 Ҳайдовчи менюси\n\n"
-            f"🚛 Техника: {driver_car}\n"
-            f"⛽ Ёқилғи тури: {fuel_type}",
+            driver_menu_text(update.effective_user.id),
             reply_markup=driver_main_keyboard(fuel_type)
         )
         return
@@ -6487,9 +6538,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text("❌ Дизел олиш рад этилди.")  
         await update.message.reply_text(
-            f"🚚 Ҳайдовчи менюси\n\n"
-            f"🚛 Техника: {driver_car}\n"
-            f"⛽ Ёқилғи тури: {fuel_type}",
+            driver_menu_text(update.effective_user.id),
             reply_markup=driver_main_keyboard(fuel_type)
         )
         
@@ -6501,9 +6550,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text("❌ Дизел олиш рад этилди.")
         await update.message.reply_text(
-            f"🚚 Ҳайдовчи менюси\n\n"
-            f"🚛 Техника: {driver_car}\n"
-            f"⛽ Ёқилғи тури: {fuel_type}",
+            driver_menu_text(update.effective_user.id),
             reply_markup=driver_main_keyboard(fuel_type)
         )
         return
@@ -6659,9 +6706,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if mode == "fuel_menu":
             context.user_data.clear()
             await update.message.reply_text(
-                f"🚚 Ҳайдовчи менюси\n\n"
-                f"🚛 Техника: {driver_car}\n"
-                f"⛽ Ёқилғи тури: {fuel_type}",
+                driver_menu_text(update.effective_user.id),
                 reply_markup=driver_main_keyboard(fuel_type)
             )
             return
@@ -6840,9 +6885,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
 
         await update.message.reply_text(
-            f"🚚 Ҳайдовчи менюси\n\n"
-            f"🚛 Техника: {driver_car}\n"
-            f"⛽ Ёқилғи тури: {fuel_type}",
+            driver_menu_text(update.effective_user.id),
             reply_markup=driver_main_keyboard(fuel_type)
         )
         return
@@ -7330,9 +7373,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 fuel_type = get_car_fuel_type(driver_car)
 
                 await update.message.reply_text(
-                    f"🚚 Ҳайдовчи менюси\n\n"
-                    f"🚛 Техника: {driver_car}\n"
-                    f"⛽ Ёқилғи тури: {fuel_type}",
+                    driver_menu_text(update.effective_user.id),
                     reply_markup=driver_main_keyboard(fuel_type)
                 )
                 return
@@ -7630,9 +7671,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             driver_car = get_driver_car(update.effective_user.id)
             fuel_type = get_car_fuel_type(driver_car)
             await update.message.reply_text(
-                f"🚚 Ҳайдовчи менюси\n\n"
-                f"🚛 Техника: {driver_car}\n"
-                f"⛽ Ёқилғи тури: {fuel_type}",
+                driver_menu_text(update.effective_user.id),
                 reply_markup=driver_main_keyboard(fuel_type)
             )
             return
