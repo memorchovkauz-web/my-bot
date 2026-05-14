@@ -1,4 +1,7 @@
 import os
+import io
+import zipfile
+from xml.sax.saxutils import escape
 import json
 import re
 import time
@@ -23,6 +26,7 @@ from telegram import (
     KeyboardButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputFile,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -429,6 +433,7 @@ CREATE TABLE IF NOT EXISTS gas_transfers (
     video_id TEXT,
     status TEXT DEFAULT 'Текширувда',
     receiver_comment TEXT,
+    approved_by_id BIGINT,
     created_at TIMESTAMP DEFAULT NOW(),
     answered_at TIMESTAMP
 )
@@ -448,6 +453,7 @@ CREATE TABLE IF NOT EXISTS diesel_transfers (
     video_id TEXT,
     status TEXT DEFAULT 'Қабул қилувчи текширувида',
     receiver_comment TEXT,
+    approved_by_id BIGINT,
     created_at TIMESTAMP DEFAULT NOW(),
     answered_at TIMESTAMP
 )
@@ -461,6 +467,16 @@ except Exception as e:
     print("DIESEL TRANSFERS ADD speedometer_photo_id ERROR:", e)
     conn.rollback()
 
+# V24: Excel ҳисоботда “ким тасдиқлаган” чиқиши учун хавфсиз колонкалар.
+# Эски маълумотларга таъсир қилмайди, фақат кейинги тасдиқларда ID сақланади.
+try:
+    cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS approved_by_id BIGINT")
+    cursor.execute("ALTER TABLE diesel_prihod ADD COLUMN IF NOT EXISTS approved_by_id BIGINT")
+    conn.commit()
+except Exception as e:
+    print("DIESEL REPORT approved_by_id ALTER ERROR:", e)
+    conn.rollback()
+
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS diesel_prihod (
@@ -472,6 +488,7 @@ CREATE TABLE IF NOT EXISTS diesel_prihod (
     photo_id TEXT,
     status TEXT DEFAULT 'Текширувда',
     receiver_comment TEXT,
+    approved_by_id BIGINT,
     created_at TIMESTAMP DEFAULT NOW(),
     answered_at TIMESTAMP
 )
@@ -2400,6 +2417,7 @@ def zapravshik_main_keyboard():
         return cached
     return cache_set("keyboard:zapravshik_main", ReplyKeyboardMarkup([
         [KeyboardButton("🟡 Дизел бўлими")],
+        [KeyboardButton("📊 Ҳисобот")],
     ], resize_keyboard=True))
 
 
@@ -2960,6 +2978,198 @@ def parse_diesel_prihod_note(raw_note):
         note = lines[1].strip() if len(lines) > 1 else ""
 
     return firm, note, receiver_comment
+
+
+
+# ================= V24 ZAPRAVSHIK EXCEL REPORT =================
+# Dependency-free .xlsx generator: openpyxl талаб қилмайди, Render requirements бузилмайди.
+def _xlsx_col_name(col_index):
+    name = ""
+    while col_index:
+        col_index, rem = divmod(col_index - 1, 26)
+        name = chr(65 + rem) + name
+    return name
+
+
+def _xlsx_sheet_xml(rows):
+    sheet_rows = []
+    for r_idx, row in enumerate(rows, start=1):
+        cells = []
+        for c_idx, value in enumerate(row, start=1):
+            ref = f"{_xlsx_col_name(c_idx)}{r_idx}"
+            text = "" if value is None else str(value)
+            cells.append(
+                f'<c r="{ref}" t="inlineStr"><is><t>{escape(text)}</t></is></c>'
+            )
+        sheet_rows.append(f'<row r="{r_idx}">{"".join(cells)}</row>')
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheetData>' + ''.join(sheet_rows) + '</sheetData>'
+        '</worksheet>'
+    )
+
+
+def build_xlsx_file(sheets):
+    """sheets = [(sheet_name, rows), ...] -> BytesIO"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>""")
+        z.writestr("_rels/.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""")
+        z.writestr("xl/styles.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>""")
+
+        workbook_sheets = []
+        rels = []
+        for idx, (sheet_name, rows) in enumerate(sheets, start=1):
+            safe_name = escape(str(sheet_name)[:31])
+            workbook_sheets.append(f'<sheet name="{safe_name}" sheetId="{idx}" r:id="rId{idx}"/>')
+            rels.append(
+                f'<Relationship Id="rId{idx}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{idx}.xml"/>'
+            )
+            z.writestr(f"xl/worksheets/sheet{idx}.xml", _xlsx_sheet_xml(rows))
+
+        z.writestr("xl/workbook.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>""" + ''.join(workbook_sheets) + "</sheets></workbook>")
+        z.writestr("xl/_rels/workbook.xml.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">""" + ''.join(rels) + "</Relationships>")
+
+    buffer.seek(0)
+    return buffer
+
+
+def _report_full_name(name, surname, fallback=""):
+    full = f"{surname or ''} {name or ''}".strip()
+    return full or fallback or "-"
+
+
+def _report_date(value):
+    try:
+        return value.strftime("%d.%m.%Y %H:%M") if value else ""
+    except Exception:
+        return ""
+
+
+def build_zapravshik_diesel_report_file():
+    headers = [
+        "Сана",
+        "Фирма номи",
+        "Литр",
+        "Ким томонидан берилган",
+        "Ким томонидан олинган",
+        "Ким тасдиқлаган",
+        "Статус",
+    ]
+
+    rashod_rows = [headers]
+    prihod_rows = [headers]
+
+    cursor.execute("""
+        SELECT
+            dt.created_at,
+            dt.firm,
+            dt.liter,
+            dt.from_driver_id,
+            dt.from_car,
+            fd.name,
+            fd.surname,
+            dt.to_driver_id,
+            dt.to_car,
+            td.name,
+            td.surname,
+            dt.approved_by_id,
+            ab.name,
+            ab.surname,
+            dt.status
+        FROM diesel_transfers dt
+        LEFT JOIN drivers fd ON fd.telegram_id = dt.from_driver_id
+        LEFT JOIN drivers td ON td.telegram_id = dt.to_driver_id
+        LEFT JOIN drivers ab ON ab.telegram_id = dt.approved_by_id
+        ORDER BY dt.created_at DESC, dt.id DESC
+    """)
+
+    for row in cursor.fetchall():
+        (
+            created_at, firm, liter,
+            from_driver_id, from_car, fd_name, fd_surname,
+            to_driver_id, to_car, td_name, td_surname,
+            approved_by_id, ab_name, ab_surname,
+            status,
+        ) = row
+
+        if str(from_car or "").strip() == "Заправщик":
+            giver = _report_full_name(fd_name, fd_surname, "Заправщик")
+        else:
+            giver = _report_full_name(fd_name, fd_surname, str(from_car or "-"))
+
+        receiver = _report_full_name(td_name, td_surname, str(to_car or "-"))
+
+        if approved_by_id:
+            approved_by = _report_full_name(ab_name, ab_surname, "-")
+        elif (status or "").strip() == "Тасдиқланди" and not to_driver_id:
+            approved_by = "Автоматик"
+        else:
+            approved_by = ""
+
+        rashod_rows.append([
+            _report_date(created_at),
+            firm or "",
+            liter or "",
+            giver,
+            receiver,
+            approved_by,
+            diesel_status_display(status),
+        ])
+
+    cursor.execute("""
+        SELECT
+            dp.created_at,
+            dp.liter,
+            dp.note,
+            dp.telegram_id,
+            d.name,
+            d.surname,
+            dp.approved_by_id,
+            ab.name,
+            ab.surname,
+            dp.status
+        FROM diesel_prihod dp
+        LEFT JOIN drivers d ON d.telegram_id = dp.telegram_id
+        LEFT JOIN drivers ab ON ab.telegram_id = dp.approved_by_id
+        ORDER BY dp.created_at DESC, dp.id DESC
+    """)
+
+    for row in cursor.fetchall():
+        created_at, liter, note, telegram_id, name, surname, approved_by_id, ab_name, ab_surname, status = row
+        firm, _, _ = parse_diesel_prihod_note(note or "")
+        giver = _report_full_name(name, surname, get_employee_full_name_by_telegram_id(telegram_id) if telegram_id else "-")
+        approved_by = _report_full_name(ab_name, ab_surname, "") if approved_by_id else ""
+
+        prihod_rows.append([
+            _report_date(created_at),
+            firm or "",
+            liter or "",
+            giver,
+            "Заправка омбори",
+            approved_by,
+            status or "",
+        ])
+
+    return build_xlsx_file([
+        ("Дизел Расходлар", rashod_rows),
+        ("Дизел Приходлар", prihod_rows),
+    ])
 
 
 def get_diesel_prihod_note_for_db(context):
@@ -5693,6 +5903,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # === Заправщик: дизел приход text flow ===
     if current_role == "zapravshik":
+        if text == "📊 Ҳисобот":
+            await clear_all_inline_messages(context, update.effective_chat.id)
+            context.user_data["mode"] = "zapravshik_report"
+            wait_msg = await update.message.reply_text("⏳ Excel ҳисобот тайёрланяпти...")
+            try:
+                report_file = build_zapravshik_diesel_report_file()
+                filename = f"diesel_hisobot_{datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%Y_%m_%d_%H_%M')}.xlsx"
+                await update.message.reply_document(
+                    document=InputFile(report_file, filename=filename),
+                    filename=filename,
+                    caption=(
+                        "📊 Ҳисобот тайёр.\n"
+                        "Файл ичида 2 та лист бор:\n"
+                        "1) Дизел Расходлар\n"
+                        "2) Дизел Приходлар"
+                    ),
+                    reply_markup=zapravshik_main_keyboard()
+                )
+            except Exception as e:
+                print("ZAPRAVSHIK DIESEL REPORT ERROR:", e)
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                await update.message.reply_text(
+                    "❌ Ҳисобот тайёрлашда хато бўлди. Илтимос, қайта уриниб кўринг.",
+                    reply_markup=zapravshik_main_keyboard()
+                )
+            try:
+                await wait_msg.delete()
+            except Exception:
+                pass
+            return
         if text == "⬅️ Орқага" and mode == "zapravshik_diesel_menu":
             context.user_data.clear()
             await update.message.reply_text(zapravka_info_text(), reply_markup=zapravshik_main_keyboard())
@@ -8442,9 +8685,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             cursor.execute("""
                 UPDATE diesel_prihod
-                SET status = %s
+                SET status = %s,
+                    approved_by_id = %s
                 WHERE id = %s
-            """, ("Тасдиқланди", int(record_id)))
+            """, ("Тасдиқланди", int(update.effective_user.id), int(record_id)))
             conn.commit()
         except Exception as e:
             print("DIESEL PRIHOD APPROVE ERROR:", e)
@@ -9825,7 +10069,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             SET status = %s, answered_at = NOW()
             WHERE id = %s
             RETURNING from_driver_id
-        """, ("Тасдиқланди", transfer_id))
+        """, ("Тасдиқланди", int(update.effective_user.id), transfer_id))
 
         row = cursor.fetchone()
         conn.commit()
@@ -10892,9 +11136,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("""
             UPDATE diesel_transfers
             SET status = %s,
+                approved_by_id = %s,
                 answered_at = NOW()
             WHERE id = %s
-        """, ("Тасдиқланди", transfer_id))
+        """, ("Тасдиқланди", int(update.effective_user.id), transfer_id))
 
         conn.commit()
 
