@@ -2232,6 +2232,7 @@ def get_all_diesel_stock_by_firm_cached():
             ), 0)
             FROM diesel_transfers
             WHERE TRIM(COALESCE(status, '')) IN ('Тасдиқланди', 'Берилди')
+              AND TRIM(COALESCE(from_car, '')) = 'Заправщик'
             GROUP BY COALESCE(firm, '')
         """)
         for firm_text, total in cursor.fetchall():
@@ -2981,7 +2982,7 @@ def parse_diesel_prihod_note(raw_note):
 
 
 
-# ================= V24 ZAPRAVSHIK EXCEL REPORT =================
+# ================= V26 ZAPRAVSHIK ONLY REPORTS + STOCK FILTER =================
 # Dependency-free .xlsx generator: openpyxl талаб қилмайди, Render requirements бузилмайди.
 def _xlsx_col_name(col_index):
     name = ""
@@ -3096,6 +3097,7 @@ def build_zapravshik_diesel_report_file():
         LEFT JOIN drivers fd ON fd.telegram_id = dt.from_driver_id
         LEFT JOIN drivers td ON td.telegram_id = dt.to_driver_id
         LEFT JOIN drivers ab ON ab.telegram_id = dt.approved_by_id
+        WHERE TRIM(COALESCE(dt.from_car, '')) = 'Заправщик'
         ORDER BY dt.created_at DESC, dt.id DESC
     """)
 
