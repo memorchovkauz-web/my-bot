@@ -3184,7 +3184,7 @@ def _report_date(value):
 
 
 def build_zapravshik_diesel_report_file():
-    headers = [
+    rashod_headers = [
         "Сана",
         "Фирма номи",
         "Литр",
@@ -3195,8 +3195,20 @@ def build_zapravshik_diesel_report_file():
         "Статус",
     ]
 
-    rashod_rows = [headers]
-    prihod_rows = [headers]
+    # Дизел приход листида "Спидометр/моточас" устуни керак эмас.
+    # Расход листи структурасига тегилмайди.
+    prihod_headers = [
+        "Сана",
+        "Фирма номи",
+        "Литр",
+        "Ким томонидан берилган",
+        "Ким томонидан олинган",
+        "Ким тасдиқлаган",
+        "Статус",
+    ]
+
+    rashod_rows = [rashod_headers]
+    prihod_rows = [prihod_headers]
 
     cursor.execute("""
         SELECT
@@ -3241,7 +3253,9 @@ def build_zapravshik_diesel_report_file():
         receiver = _report_full_name(td_name, td_surname, str(to_car or "-"))
 
         if approved_by_id:
-            approved_by = _report_full_name(ab_name, ab_surname, "-")
+            approved_by = _report_full_name(ab_name, ab_surname, "")
+            if not approved_by:
+                approved_by = get_employee_full_name_by_telegram_id(approved_by_id)
         elif (status or "").strip() == "Тасдиқланди" and not to_driver_id:
             approved_by = "Автоматик"
         else:
@@ -3280,13 +3294,17 @@ def build_zapravshik_diesel_report_file():
         created_at, liter, note, telegram_id, name, surname, approved_by_id, ab_name, ab_surname, status = row
         firm, _, _ = parse_diesel_prihod_note(note or "")
         giver = _report_full_name(name, surname, get_employee_full_name_by_telegram_id(telegram_id) if telegram_id else "-")
-        approved_by = _report_full_name(ab_name, ab_surname, "") if approved_by_id else ""
+        if approved_by_id:
+            approved_by = _report_full_name(ab_name, ab_surname, "")
+            if not approved_by:
+                approved_by = get_employee_full_name_by_telegram_id(approved_by_id)
+        else:
+            approved_by = ""
 
         prihod_rows.append([
             _report_date(created_at),
             firm or "",
             liter or "",
-            "",
             giver,
             "Заправка омбори",
             approved_by,
