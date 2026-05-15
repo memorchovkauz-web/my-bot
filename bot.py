@@ -434,6 +434,7 @@ CREATE TABLE IF NOT EXISTS gas_transfers (
     status TEXT DEFAULT 'Текширувда',
     receiver_comment TEXT,
     approved_by_id BIGINT,
+    approved_by_name TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     answered_at TIMESTAMP
 )
@@ -454,6 +455,7 @@ CREATE TABLE IF NOT EXISTS diesel_transfers (
     status TEXT DEFAULT 'Қабул қилувчи текширувида',
     receiver_comment TEXT,
     approved_by_id BIGINT,
+    approved_by_name TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     answered_at TIMESTAMP
 )
@@ -471,7 +473,9 @@ except Exception as e:
 # Эски маълумотларга таъсир қилмайди, фақат кейинги тасдиқларда ID сақланади.
 try:
     cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS approved_by_id BIGINT")
+    cursor.execute("ALTER TABLE diesel_transfers ADD COLUMN IF NOT EXISTS approved_by_name TEXT")
     cursor.execute("ALTER TABLE diesel_prihod ADD COLUMN IF NOT EXISTS approved_by_id BIGINT")
+    cursor.execute("ALTER TABLE diesel_prihod ADD COLUMN IF NOT EXISTS approved_by_name TEXT")
     conn.commit()
 except Exception as e:
     print("DIESEL REPORT approved_by_id ALTER ERROR:", e)
@@ -489,6 +493,7 @@ CREATE TABLE IF NOT EXISTS diesel_prihod (
     status TEXT DEFAULT 'Текширувда',
     receiver_comment TEXT,
     approved_by_id BIGINT,
+    approved_by_name TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     answered_at TIMESTAMP
 )
@@ -3176,6 +3181,23 @@ def _report_full_name(name, surname, fallback=""):
     return full or fallback or "-"
 
 
+def _report_approved_name(approved_by_id=None, approved_by_name=None, name=None, surname=None, fallback=""):
+    saved_name = (approved_by_name or "").strip()
+    if saved_name:
+        return saved_name
+
+    joined_name = f"{surname or ''} {name or ''}".strip()
+    if joined_name:
+        return joined_name
+
+    if approved_by_id:
+        resolved = get_employee_full_name_by_telegram_id(approved_by_id)
+        if resolved and resolved != "Номаълум":
+            return resolved
+
+    return fallback or ""
+
+
 def _report_date(value):
     try:
         return value.strftime("%d.%m.%Y %H:%M") if value else ""
@@ -3225,6 +3247,7 @@ def build_zapravshik_diesel_report_file():
             td.name,
             td.surname,
             dt.approved_by_id,
+            dt.approved_by_name,
             ab.name,
             ab.surname,
             dt.status
@@ -3241,7 +3264,7 @@ def build_zapravshik_diesel_report_file():
             created_at, firm, liter, speedometer_value,
             from_driver_id, from_car, fd_name, fd_surname,
             to_driver_id, to_car, td_name, td_surname,
-            approved_by_id, ab_name, ab_surname,
+            approved_by_id, approved_by_name, ab_name, ab_surname,
             status,
         ) = row
 
@@ -3252,14 +3275,13 @@ def build_zapravshik_diesel_report_file():
 
         receiver = _report_full_name(td_name, td_surname, str(to_car or "-"))
 
-        if approved_by_id:
-            approved_by = _report_full_name(ab_name, ab_surname, "")
-            if not approved_by:
-                approved_by = get_employee_full_name_by_telegram_id(approved_by_id)
-        elif (status or "").strip() == "Тасдиқланди" and not to_driver_id:
-            approved_by = "Автоматик"
-        else:
-            approved_by = ""
+        approved_by = _report_approved_name(
+            approved_by_id=approved_by_id,
+            approved_by_name=approved_by_name,
+            name=ab_name,
+            surname=ab_surname,
+            fallback="Автоматик" if (status or "").strip() == "Тасдиқланди" and not to_driver_id else ""
+        )
 
         rashod_rows.append([
             _report_date(created_at),
@@ -3281,6 +3303,7 @@ def build_zapravshik_diesel_report_file():
             d.name,
             d.surname,
             dp.approved_by_id,
+            dp.approved_by_name,
             ab.name,
             ab.surname,
             dp.status
@@ -3291,15 +3314,16 @@ def build_zapravshik_diesel_report_file():
     """)
 
     for row in cursor.fetchall():
-        created_at, liter, note, telegram_id, name, surname, approved_by_id, ab_name, ab_surname, status = row
+        created_at, liter, note, telegram_id, name, surname, approved_by_id, approved_by_name, ab_name, ab_surname, status = row
         firm, _, _ = parse_diesel_prihod_note(note or "")
         giver = _report_full_name(name, surname, get_employee_full_name_by_telegram_id(telegram_id) if telegram_id else "-")
-        if approved_by_id:
-            approved_by = _report_full_name(ab_name, ab_surname, "")
-            if not approved_by:
-                approved_by = get_employee_full_name_by_telegram_id(approved_by_id)
-        else:
-            approved_by = ""
+        approved_by = _report_approved_name(
+            approved_by_id=approved_by_id,
+            approved_by_name=approved_by_name,
+            name=ab_name,
+            surname=ab_surname,
+            fallback="Тасдиқловчи сақланмаган" if (status or "").strip() == "Тасдиқланди" else ""
+        )
 
         prihod_rows.append([
             _report_date(created_at),
@@ -9706,12 +9730,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await apply_diesel_prihod_staged_edits(context, record_id)
 
+            approver_id = int(update.effective_user.id)
+            approver_name = get_employee_full_name_by_telegram_id(approver_id)
+
             cursor.execute("""
                 UPDATE diesel_prihod
                 SET status = %s,
-                    approved_by_id = %s
+                    approved_by_id = %s,
+                    approved_by_name = %s
                 WHERE id = %s
-            """, ("Тасдиқланди", int(update.effective_user.id), int(record_id)))
+            """, ("Тасдиқланди", approver_id, approver_name, int(record_id)))
             conn.commit()
         except Exception as e:
             print("DIESEL PRIHOD APPROVE ERROR:", e)
