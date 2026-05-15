@@ -1132,6 +1132,7 @@ def technadzor_keyboard():
         [KeyboardButton("🔧 Ремонтга қўшиш")],
         [KeyboardButton("👥 Ходимлар")],
         [KeyboardButton("💾 История")],
+        [KeyboardButton("📊 Ҳисоботлар")],
     ], resize_keyboard=True)
 
 
@@ -1155,6 +1156,22 @@ def technadzor_history_keyboard():
         [KeyboardButton("📚 История Ремонт")],
         [KeyboardButton("⛽ История ГАЗ")],
         [KeyboardButton("🟡 История Дизел")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+def technadzor_reports_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("📋 Отчет Ремонт")],
+        [KeyboardButton("⛽ Отчет Дизел")],
+        [KeyboardButton("🟢 Отчет Газ")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
+def technadzor_remont_report_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("📄 EXCEL файл")],
+        [KeyboardButton("📚 История Ремонт")],
         [KeyboardButton("⬅️ Орқага")],
     ], resize_keyboard=True)
 
@@ -3358,6 +3375,101 @@ def build_zapravshik_diesel_report_file():
     return build_xlsx_file([
         ("Дизел Расходлар", rashod_rows),
         ("Дизел Приходлар", prihod_rows),
+    ])
+
+
+def _report_person_name_for_excel(value):
+    raw = "" if value is None else str(value).strip()
+    if not raw:
+        return ""
+
+    numeric = raw.replace("+", "", 1)
+    if numeric.isdigit():
+        resolved = get_employee_full_name_by_telegram_id(raw)
+        if resolved and resolved != "Номаълум":
+            return resolved
+
+    return raw
+
+
+def build_technadzor_remont_report_file():
+    headers = [
+        "ID",
+        "Фирма",
+        "Техника номери",
+        "Техника тури",
+        "КМ/Моточас",
+        "Ремонт тури",
+        "Статус",
+        "Изоҳ",
+        "Механик/Киритган",
+        "Ремонтдан чиқарган",
+        "Текширувчи",
+        "Ремонтга кирган сана",
+        "Ремонтдан чиққан сана",
+        "Тасдиқланган сана",
+    ]
+
+    rows = [headers]
+
+    cursor.execute("""
+        SELECT
+            r.id,
+            COALESCE(c.firm, ''),
+            r.car_number,
+            COALESCE(c.car_type, ''),
+            r.km,
+            r.repair_type,
+            r.status,
+            r.comment,
+            r.entered_by,
+            r.exited_by,
+            r.approved_by,
+            r.entered_at,
+            r.exited_at,
+            r.approved_at
+        FROM repairs r
+        LEFT JOIN cars c ON LOWER(TRIM(c.car_number)) = LOWER(TRIM(r.car_number))
+        ORDER BY COALESCE(r.approved_at, r.exited_at, r.entered_at) DESC, r.id DESC
+    """)
+
+    for row in cursor.fetchall():
+        (
+            repair_id,
+            firm,
+            car_number,
+            car_type,
+            km,
+            repair_type,
+            status,
+            comment,
+            entered_by,
+            exited_by,
+            approved_by,
+            entered_at,
+            exited_at,
+            approved_at,
+        ) = row
+
+        rows.append([
+            repair_id or "",
+            firm or "",
+            car_number or "",
+            car_type or "",
+            km or "",
+            repair_type or "",
+            status or "",
+            comment or "",
+            _report_person_name_for_excel(entered_by),
+            _report_person_name_for_excel(exited_by),
+            _report_person_name_for_excel(approved_by),
+            _report_date(entered_at),
+            _report_date(exited_at),
+            _report_date(approved_at),
+        ])
+
+    return build_xlsx_file([
+        ("Отчет Ремонт", rows),
     ])
 
 
@@ -6286,6 +6398,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⛽ Заправщик",
         "📋 Текширувдаги ходимлар",
         "👥 Ходимлар",
+        "📊 Ҳисоботлар",
+        "📋 Отчет Ремонт",
+        "⛽ Отчет Дизел",
+        "🟢 Отчет Газ",
+        "📄 EXCEL файл",
+        "📚 История Ремонт",
         "📋 Текшириш",
         "🚗 Ремонтга киритиш",
         "🚗 Ремонтдан чиқариш",
@@ -6977,6 +7095,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "select_firm_for_add",
             "technadzor_staff_menu",
             "technadzor_history_menu",
+            "technadzor_reports_menu",
         ]:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             context.user_data.clear()
@@ -6991,6 +7110,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "history_select_firm",
             "history_select_car",
             "history_period",
+            "technadzor_report_remont_menu",
         ]:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             if mode == "confirm_exit_card":
@@ -7000,11 +7120,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 remember_inline_message(context, msg)
                 return
 
-            context.user_data["mode"] = "technadzor_notifications_menu" if mode in ["technadzor_registration_list", "confirm_exit", "technadzor_diesel_prihod_list"] else "technadzor_history_menu"
-            await update.message.reply_text(
-                "🔔 Уведомления" if context.user_data["mode"] == "technadzor_notifications_menu" else "💾 История",
-                reply_markup=technadzor_notifications_keyboard() if context.user_data["mode"] == "technadzor_notifications_menu" else technadzor_history_keyboard()
-            )
+            if mode in ["technadzor_registration_list", "confirm_exit", "technadzor_diesel_prihod_list"]:
+                context.user_data["mode"] = "technadzor_notifications_menu"
+                await update.message.reply_text("🔔 Уведомления", reply_markup=technadzor_notifications_keyboard())
+                return
+
+            if context.user_data.get("history_parent_menu") == "technadzor_report_remont_menu":
+                context.user_data.pop("history_parent_menu", None)
+                context.user_data.pop("history_car", None)
+                context.user_data["mode"] = "technadzor_report_remont_menu"
+                await update.message.reply_text("📋 Отчет Ремонт", reply_markup=technadzor_remont_report_keyboard())
+                return
+
+            context.user_data["mode"] = "technadzor_history_menu"
+            await update.message.reply_text("💾 История", reply_markup=technadzor_history_keyboard())
             return
 
         if text.startswith("🔔 Уведомления"):
@@ -7058,6 +7187,61 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["mode"] = "technadzor_history_menu"
             await update.message.reply_text("💾 История", reply_markup=technadzor_history_keyboard())
             return
+
+        if text == "📊 Ҳисоботлар":
+            await clear_all_inline_messages(context, update.effective_chat.id)
+            context.user_data["mode"] = "technadzor_reports_menu"
+            await update.message.reply_text("📊 Ҳисоботлар менюси", reply_markup=technadzor_reports_keyboard())
+            return
+
+        if mode == "technadzor_reports_menu":
+            if text == "📋 Отчет Ремонт":
+                context.user_data["mode"] = "technadzor_report_remont_menu"
+                await update.message.reply_text("📋 Отчет Ремонт", reply_markup=technadzor_remont_report_keyboard())
+                return
+
+            if text == "⛽ Отчет Дизел":
+                await update.message.reply_text("⛽ Отчет Дизел кейинги босқичда қўшилади.", reply_markup=technadzor_reports_keyboard())
+                return
+
+            if text == "🟢 Отчет Газ":
+                await update.message.reply_text("🟢 Отчет Газ кейинги босқичда қўшилади.", reply_markup=technadzor_reports_keyboard())
+                return
+
+        if mode == "technadzor_report_remont_menu":
+            if text == "📄 EXCEL файл":
+                wait_msg = await update.message.reply_text("⏳ Ремонт Excel ҳисоботи тайёрланяпти...")
+                try:
+                    report_file = build_technadzor_remont_report_file()
+                    filename = f"remont_hisobot_{datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%Y_%m_%d_%H_%M')}.xlsx"
+                    await update.message.reply_document(
+                        document=InputFile(report_file, filename=filename),
+                        filename=filename,
+                        caption="📋 Отчет Ремонт тайёр.\nМеханик ва текширувчи ID ўрнига Фамилия Исми чиқади.",
+                        reply_markup=technadzor_remont_report_keyboard()
+                    )
+                except Exception as e:
+                    print("TECHNADZOR REMONT EXCEL REPORT ERROR:", e)
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    await update.message.reply_text(
+                        "❌ Отчет Ремонт Excel файлини тайёрлашда хато бўлди. Илтимос, қайта уриниб кўринг.",
+                        reply_markup=technadzor_remont_report_keyboard()
+                    )
+                try:
+                    await wait_msg.delete()
+                except Exception:
+                    pass
+                return
+
+            if text == "📚 История Ремонт":
+                await clear_all_inline_messages(context, update.effective_chat.id)
+                context.user_data["mode"] = "history_select_firm"
+                context.user_data["history_parent_menu"] = "technadzor_report_remont_menu"
+                await update.message.reply_text("Қайси фирма техникасини кўрмоқчисиз?", reply_markup=firm_back_keyboard())
+                return
 
         if mode == "technadzor_history_menu":
             if text == "📚 История Ремонт":
