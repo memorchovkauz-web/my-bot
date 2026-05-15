@@ -6504,8 +6504,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         remember_inline_message(context, msg)
         return
 
-    # === PRIORITY: Текширувчи регистрация таҳриридан орқага ===
-    # Эски ходимлар/фирма flow'га тушиб кетмаслиги учун энг юқорида ушлаймиз.
+    # === PRIORITY: Текширувчи ходим карточкаси/таҳриридан орқага ===
+    # Ходимлар рўйхатидан очилган карточка -> айнан ўша рўйхатга қайтади.
+    # Регистрациядан очилган текширувдаги карточка -> регистрация рўйхатига қайтади.
     if current_role == "technadzor" and text == "⬅️ Орқага" and mode in [
         "technadzor_staff_edit_name",
         "technadzor_staff_edit_surname",
@@ -6515,9 +6516,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "technadzor_staff_edit_car",
         "technadzor_staff_card",
     ]:
-        await clear_technadzor_staff_inline(context, update.effective_chat.id)
         driver_id = context.user_data.get("technadzor_selected_staff_id")
+        staff = get_staff_by_id(driver_id) if driver_id else None
 
+        await clear_technadzor_staff_inline(context, update.effective_chat.id)
+
+        # Агар карточка оддий Ходимлар менюси рўйхатидан очилган бўлса,
+        # пастки Орқага фақат битта орқага — ўша ходимлар рўйхатига қайтаради.
+        if staff and staff.get("status") != "Текширувда":
+            stack = context.user_data.get("technadzor_staff_action_stack", [])
+            last_list = None
+            while stack:
+                item = stack.pop()
+                if item.get("screen") == "list":
+                    last_list = item
+                    break
+            context.user_data["technadzor_staff_action_stack"] = stack
+
+            staff_type = (last_list or {}).get("staff_type") or context.user_data.get("technadzor_staff_type") or get_staff_type_from_work_role(staff.get("work_role"))
+            firm = (last_list or {}).get("firm") if last_list is not None else context.user_data.get("technadzor_staff_firm")
+
+            context.user_data["technadzor_staff_type"] = staff_type
+            context.user_data["technadzor_staff_firm"] = firm
+            context.user_data["mode"] = "technadzor_staff_drivers_list" if staff_type == "drivers" else f"technadzor_staff_{staff_type}_list"
+
+            await update.message.reply_text(
+                technadzor_staff_list_text(staff_type, firm),
+                reply_markup=technadzor_staff_back_reply_keyboard()
+            )
+            msg = await update.message.reply_text(
+                "Керакли ходимни танланг:",
+                reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
+            )
+            context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            remember_inline_message(context, msg)
+            return
+
+        # Текширувдаги регистрация карточкасида эски логика сақланади.
         if driver_id and technadzor_rollback_pending_edit(context, driver_id):
             context.user_data["mode"] = "technadzor_registration_list"
             await update.message.reply_text(
@@ -6951,12 +6986,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "⬅️ Орқага" and mode in [
             "technadzor_registration_list",
             "confirm_exit",
+            "confirm_exit_card",
             "technadzor_diesel_prihod_list",
             "history_select_firm",
             "history_select_car",
             "history_period",
         ]:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            if mode == "confirm_exit_card":
+                context.user_data["mode"] = "confirm_exit"
+                await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=only_back_keyboard())
+                msg = await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
+                remember_inline_message(context, msg)
+                return
+
             context.user_data["mode"] = "technadzor_notifications_menu" if mode in ["technadzor_registration_list", "confirm_exit", "technadzor_diesel_prihod_list"] else "technadzor_history_menu"
             await update.message.reply_text(
                 "🔔 Уведомления" if context.user_data["mode"] == "technadzor_notifications_menu" else "💾 История",
@@ -7018,8 +7061,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if mode == "technadzor_history_menu":
             if text == "📚 История Ремонт":
+                await clear_all_inline_messages(context, update.effective_chat.id)
                 context.user_data["mode"] = "history_select_firm"
-                await update.message.reply_text("Қайси фирма техникасини кўрмоқчисиз?", reply_markup=firm_keyboard())
+                await update.message.reply_text("Қайси фирма техникасини кўрмоқчисиз?", reply_markup=firm_back_keyboard())
                 return
             if text == "⛽ История ГАЗ":
                 await update.message.reply_text("⛽ История ГАЗ кейин ишлаб чиқилади.", reply_markup=technadzor_history_keyboard())
@@ -8781,9 +8825,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "technadzor_staff_card",
     ]:
         driver_id = context.user_data.get("technadzor_selected_staff_id")
+        staff = get_staff_by_id(driver_id) if driver_id else None
 
         if driver_id:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
+
+            # Оддий ходим карточкаси Ходимлар рўйхатидан очилган бўлса,
+            # пастки Орқага регистрацияга эмас, айнан ўша рўйхатга қайтаради.
+            if staff and staff.get("status") != "Текширувда":
+                stack = context.user_data.get("technadzor_staff_action_stack", [])
+                last_list = None
+                while stack:
+                    item = stack.pop()
+                    if item.get("screen") == "list":
+                        last_list = item
+                        break
+                context.user_data["technadzor_staff_action_stack"] = stack
+
+                staff_type = (last_list or {}).get("staff_type") or context.user_data.get("technadzor_staff_type") or get_staff_type_from_work_role(staff.get("work_role"))
+                firm = (last_list or {}).get("firm") if last_list is not None else context.user_data.get("technadzor_staff_firm")
+
+                context.user_data["technadzor_staff_type"] = staff_type
+                context.user_data["technadzor_staff_firm"] = firm
+                context.user_data["mode"] = "technadzor_staff_drivers_list" if staff_type == "drivers" else f"technadzor_staff_{staff_type}_list"
+
+                await update.message.reply_text(
+                    technadzor_staff_list_text(staff_type, firm),
+                    reply_markup=technadzor_staff_back_reply_keyboard()
+                )
+                msg = await update.message.reply_text(
+                    "Керакли ходимни танланг:",
+                    reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
+                )
+                context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+                remember_inline_message(context, msg)
+                return
 
             # Агар тасдиқлаш/рад этиш босилмаган бўлса — охирги таҳрирлашдан олдинги маълумотга қайтарилади.
             if not technadzor_is_pending_decision_done(context, driver_id):
@@ -8831,6 +8907,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=technadzor_staff_menu_keyboard()
             )
             return
+
+    if role == "technadzor" and text == "⬅️ Орқага" and mode == "confirm_exit_card":
+        await clear_all_inline_messages(context, update.effective_chat.id)
+        context.user_data["mode"] = "confirm_exit"
+        await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=only_back_keyboard())
+        msg = await update.message.reply_text("Текширувда турган техникалар:", reply_markup=cars_for_check_by_firm_group())
+        remember_inline_message(context, msg)
+        return
 
     if role == "technadzor":
         if text == "⬅️ Орқага" and mode in ["select_firm_for_add", "technadzor_staff_menu"]:
@@ -13253,6 +13337,7 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
         except Exception:
             pass
 
+        context.user_data["mode"] = "confirm_exit_card"
         car = query.data.split("|", 1)[1]
         kirgan_list, chiqqan = get_last_repair_pair(car)
 
@@ -13305,10 +13390,11 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
                 chiqqan[7]
             )
 
-        await query.message.reply_text(
+        msg = await query.message.reply_text(
             "Текширув натижасини танланг:",
             reply_markup=confirm_action_keyboard(car)
         )
+        remember_inline_message(context, msg)
         return
 
     if query.data.startswith("approve|"):
@@ -13362,10 +13448,16 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
 
         conn.commit()
 
+        context.user_data["mode"] = "confirm_exit"
         await query.message.reply_text(
             f"✅ {car} соз деб тасдиқланди.\nҲолат: Соз",
+            reply_markup=only_back_keyboard()
+        )
+        msg = await query.message.reply_text(
+            "Текширувда турган техникалар:",
             reply_markup=cars_for_check_by_firm_group()
         )
+        remember_inline_message(context, msg)
         return
 
     if query.data.startswith("reject|"):
