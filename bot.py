@@ -1324,6 +1324,26 @@ def remember_inline_message_for_chat(context, chat_id, msg):
         print("REMEMBER INLINE MESSAGE FOR CHAT ERROR:", e)
 
 
+def remember_staff_inline_query_message(context, query):
+    """Текширувчи ходимлар бўлимида edit қилинган inline хабар ID'сини сақлаб қўяди.
+    Шунинг учун пастдаги Орқага ёки /start босилганда block/play/edit/delete кнопкалари қолиб кетмайди.
+    """
+    try:
+        if query and query.message:
+            msg_id = query.message.message_id
+            context.user_data["technadzor_staff_inline_message_id"] = msg_id
+            ids = context.user_data.setdefault("all_inline_message_ids", [])
+            if msg_id not in ids:
+                ids.append(msg_id)
+            chat_id = query.message.chat_id
+            key = f"all_inline_message_ids:{int(chat_id)}"
+            bot_ids = context.bot_data.setdefault(key, [])
+            if msg_id not in bot_ids:
+                bot_ids.append(msg_id)
+    except Exception as e:
+        print("REMEMBER STAFF INLINE QUERY MESSAGE ERROR:", e)
+
+
 async def clear_all_inline_messages(context, chat_id):
     try:
         ids = []
@@ -8237,6 +8257,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     if text == "⬅️ Орқага":
+        if mode == "technadzor_staff_edit_menu":
+            await clear_technadzor_staff_inline(context, update.effective_chat.id)
+            driver_id = context.user_data.get("technadzor_selected_staff_id")
+            context.user_data["mode"] = "technadzor_staff_card"
+            msg = await update.message.reply_text(
+                technadzor_staff_card_text(driver_id),
+                reply_markup=technadzor_staff_card_reply_markup(driver_id)
+            )
+            context.user_data["technadzor_staff_inline_message_id"] = msg.message_id
+            remember_inline_message(context, msg)
+            return
+
         if mode in ["technadzor_staff_edit_name", "technadzor_staff_edit_surname", "technadzor_staff_edit_phone", "technadzor_staff_edit_role", "technadzor_staff_edit_firm", "technadzor_staff_edit_car"]:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             driver_id = context.user_data.get("technadzor_selected_staff_id")
@@ -10365,11 +10397,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "staff_type": context.user_data.get("technadzor_staff_type", "drivers"),
             "firm": context.user_data.get("technadzor_staff_firm"),
         })
+        context.user_data["mode"] = "technadzor_staff_card"
         context.user_data["technadzor_selected_staff_id"] = driver_id
+        remember_staff_inline_query_message(context, query)
         await safe_edit_message_text(query, 
             technadzor_staff_card_text(driver_id),
             reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
+        remember_staff_inline_query_message(context, query)
         return
 
     if data.startswith("tz_staff_edit|"):
@@ -10380,11 +10415,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "screen": "card",
             "driver_id": driver_id,
         })
+        context.user_data["mode"] = "technadzor_staff_edit_menu"
         context.user_data["technadzor_selected_staff_id"] = driver_id
+        remember_staff_inline_query_message(context, query)
         await safe_edit_message_text(query, 
             "✏️ Қайси маълумотни таҳрирлайсиз?",
             reply_markup=technadzor_staff_edit_keyboard(driver_id)
         )
+        remember_staff_inline_query_message(context, query)
         return
 
     if data.startswith("tz_staff_edit_field|"):
@@ -10532,10 +10570,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif new_status == "Тасдиқланди":
             await notify_staff_play(context, telegram_id)
 
+        context.user_data["mode"] = "technadzor_staff_card"
+        context.user_data["technadzor_selected_staff_id"] = driver_id
+        remember_staff_inline_query_message(context, query)
         await safe_edit_message_text(query, 
             technadzor_staff_card_text(driver_id),
             reply_markup=technadzor_staff_card_reply_markup(driver_id)
         )
+        remember_staff_inline_query_message(context, query)
         return
 
     if data == "tz_staff_action_back":
@@ -10558,27 +10600,37 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not last:
             staff_type = context.user_data.get("technadzor_staff_type", "drivers")
             firm = context.user_data.get("technadzor_staff_firm")
+            context.user_data["mode"] = "technadzor_staff_drivers_list" if staff_type == "drivers" else f"technadzor_staff_{staff_type}_list"
+            remember_staff_inline_query_message(context, query)
             await safe_edit_message_text(query, 
                 technadzor_staff_list_text(staff_type, firm),
                 reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
             )
+            remember_staff_inline_query_message(context, query)
             return
 
         if last.get("screen") == "list":
             staff_type = last.get("staff_type", "drivers")
             firm = last.get("firm")
+            context.user_data["mode"] = "technadzor_staff_drivers_list" if staff_type == "drivers" else f"technadzor_staff_{staff_type}_list"
+            remember_staff_inline_query_message(context, query)
             await safe_edit_message_text(query, 
                 technadzor_staff_list_text(staff_type, firm),
                 reply_markup=technadzor_staff_list_inline_keyboard(staff_type, firm)
             )
+            remember_staff_inline_query_message(context, query)
             return
 
         if last.get("screen") == "card":
             driver_id = last.get("driver_id")
+            context.user_data["mode"] = "technadzor_staff_card"
+            context.user_data["technadzor_selected_staff_id"] = driver_id
+            remember_staff_inline_query_message(context, query)
             await safe_edit_message_text(query, 
                 technadzor_staff_card_text(driver_id),
                 reply_markup=technadzor_staff_card_reply_markup(driver_id)
             )
+            remember_staff_inline_query_message(context, query)
             return
 
         if last.get("screen") == "edit_menu":
@@ -10591,10 +10643,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
+            context.user_data["mode"] = "technadzor_staff_edit_menu"
+            remember_staff_inline_query_message(context, query)
             await safe_edit_message_text(query, 
                 "✏️ Қайси маълумотни таҳрирлайсиз?",
                 reply_markup=technadzor_staff_edit_keyboard(driver_id)
             )
+            remember_staff_inline_query_message(context, query)
             return
 
     if data.startswith("tz_staff_back|"):
