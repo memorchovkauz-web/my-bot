@@ -1153,7 +1153,6 @@ def technadzor_notifications_keyboard():
 
 def technadzor_history_keyboard():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("📚 История Ремонт")],
         [KeyboardButton("⛽ История ГАЗ")],
         [KeyboardButton("🟡 История Дизел")],
         [KeyboardButton("⬅️ Орқага")],
@@ -1172,6 +1171,14 @@ def technadzor_remont_report_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("📄 EXCEL файл")],
         [KeyboardButton("📚 История Ремонт")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
+def technadzor_diesel_report_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("📄 EXCEL файл")],
+        [KeyboardButton("📚 История Дизел")],
         [KeyboardButton("⬅️ Орқага")],
     ], resize_keyboard=True)
 
@@ -3390,6 +3397,241 @@ def _report_person_name_for_excel(value):
             return resolved
 
     return raw
+
+
+
+def _technadzor_diesel_summary_rows():
+    rows = [["⛽ ЗАПРАВКА МАЬЛУМОТИ"], []]
+    total_prihod = 0.0
+    total_rashod = 0.0
+    total_ostatka = 0.0
+    stock_data = get_all_diesel_stock_by_firm_cached()
+
+    for firm in FIRM_NAMES:
+        item = stock_data.get(firm, {})
+        prihod = float(item.get("prihod", 0) or 0)
+        rashod = float(item.get("rashod", 0) or 0)
+        ostatka = prihod - rashod
+        total_prihod += prihod
+        total_rashod += rashod
+        total_ostatka += ostatka
+
+        rows.append([firm])
+        rows.append([f"Приход: {format_liter(prihod)}л / Расход: {format_liter(rashod)}л / Остатка: {format_liter(ostatka)}л"])
+        rows.append([])
+
+    other_total = get_other_diesel_expense_total()
+    total_rashod += float(other_total or 0)
+    total_ostatka -= float(other_total or 0)
+
+    rows.append(["📦 Бошқа дизел расходлар"])
+    rows.append([f"Остатка: -{format_liter(other_total)}л"])
+    rows.append(["--------------------------------"])
+    rows.append(["✅ ИТОГО:"])
+    rows.append([f"Приход: {format_liter(total_prihod)}л / Расход: {format_liter(total_rashod)}л / Остатка: {format_liter(total_ostatka)}л"])
+    return rows
+
+
+def build_technadzor_diesel_report_file():
+    common_headers = [
+        "Сана",
+        "Фирма номи",
+        "Техника",
+        "Литр",
+        "Спидометр/моточас",
+        "Ким томонидан берилган",
+        "Ким томонидан олинган",
+        "Ким тасдиқлаган",
+        "Статус",
+        "Изоҳ",
+    ]
+
+    zap_prihod_rows = [[
+        "Сана",
+        "Фирма номи",
+        "Литр",
+        "Ким приход қилган",
+        "Ким тасдиқлаган",
+        "Статус",
+        "Изоҳ",
+    ]]
+    zap_rashod_rows = [common_headers]
+    driver_rows = [["Тури"] + common_headers]
+
+    # 2-лист: Заправщик приход қилган дизел маълумотлари.
+    cursor.execute("""
+        SELECT
+            dp.created_at,
+            dp.liter,
+            dp.note,
+            dp.telegram_id,
+            d.name,
+            d.surname,
+            dp.approved_by_id,
+            dp.approved_by_name,
+            ab.name,
+            ab.surname,
+            dp.status
+        FROM diesel_prihod dp
+        LEFT JOIN drivers d ON d.telegram_id = dp.telegram_id
+        LEFT JOIN drivers ab ON ab.telegram_id = dp.approved_by_id
+        WHERE COALESCE(d.work_role, 'driver') = 'zapravshik'
+        ORDER BY dp.created_at DESC, dp.id DESC
+    """)
+    for row in cursor.fetchall():
+        created_at, liter, note, telegram_id, name, surname, approved_by_id, approved_by_name, ab_name, ab_surname, status = row
+        firm, note_text, receiver_comment = parse_diesel_prihod_note(note or "")
+        giver = _report_full_name(name, surname, get_employee_full_name_by_telegram_id(telegram_id) if telegram_id else "-")
+        approved_by = _report_approved_name(
+            approved_by_id=approved_by_id,
+            approved_by_name=approved_by_name,
+            name=ab_name,
+            surname=ab_surname,
+            fallback="Тасдиқловчи сақланмаган" if (status or "").strip() == "Тасдиқланди" else ""
+        )
+        zap_prihod_rows.append([
+            _report_date(created_at),
+            firm or "",
+            liter or "",
+            giver,
+            approved_by,
+            diesel_status_display(status),
+            note_text or "",
+        ])
+
+    # 3-лист: Заправщик расход қилган дизел маълумотлари.
+    cursor.execute("""
+        SELECT
+            dt.created_at,
+            dt.firm,
+            dt.to_car,
+            dt.liter,
+            dt.speedometer_photo_id,
+            dt.from_driver_id,
+            fd.name,
+            fd.surname,
+            dt.to_driver_id,
+            td.name,
+            td.surname,
+            dt.approved_by_id,
+            dt.approved_by_name,
+            ab.name,
+            ab.surname,
+            dt.status,
+            dt.note
+        FROM diesel_transfers dt
+        LEFT JOIN drivers fd ON fd.telegram_id = dt.from_driver_id
+        LEFT JOIN drivers td ON td.telegram_id = dt.to_driver_id
+        LEFT JOIN drivers ab ON ab.telegram_id = dt.approved_by_id
+        WHERE TRIM(COALESCE(dt.from_car, '')) = 'Заправщик'
+        ORDER BY dt.created_at DESC, dt.id DESC
+    """)
+    for row in cursor.fetchall():
+        (
+            created_at, firm, to_car, liter, speedometer_value,
+            from_driver_id, fd_name, fd_surname,
+            to_driver_id, td_name, td_surname,
+            approved_by_id, approved_by_name, ab_name, ab_surname,
+            status, note,
+        ) = row
+        giver = _report_full_name(fd_name, fd_surname, "Заправщик")
+        receiver = _report_full_name(td_name, td_surname, str(to_car or "-"))
+        approved_by = _report_approved_name(
+            approved_by_id=approved_by_id,
+            approved_by_name=approved_by_name,
+            name=ab_name,
+            surname=ab_surname,
+            fallback="Автоматик" if (status or "").strip() == "Тасдиқланди" and not to_driver_id else ""
+        )
+        zap_rashod_rows.append([
+            _report_date(created_at),
+            firm or "",
+            to_car or "",
+            liter or "",
+            speedometer_value or "",
+            giver,
+            receiver,
+            approved_by,
+            diesel_status_display(status),
+            note or "",
+        ])
+
+    # 4-лист: Ҳайдовчилар приход ва расход қилган дизел маълумотлари.
+    cursor.execute("""
+        SELECT
+            dt.created_at,
+            dt.firm,
+            dt.from_car,
+            dt.to_car,
+            dt.liter,
+            dt.speedometer_photo_id,
+            dt.from_driver_id,
+            fd.name,
+            fd.surname,
+            COALESCE(fd.work_role, 'driver') AS from_role,
+            dt.to_driver_id,
+            td.name,
+            td.surname,
+            COALESCE(td.work_role, 'driver') AS to_role,
+            dt.approved_by_id,
+            dt.approved_by_name,
+            ab.name,
+            ab.surname,
+            dt.status,
+            dt.note
+        FROM diesel_transfers dt
+        LEFT JOIN drivers fd ON fd.telegram_id = dt.from_driver_id
+        LEFT JOIN drivers td ON td.telegram_id = dt.to_driver_id
+        LEFT JOIN drivers ab ON ab.telegram_id = dt.approved_by_id
+        WHERE TRIM(COALESCE(dt.from_car, '')) <> 'Заправщик'
+           OR COALESCE(td.work_role, 'driver') = 'driver'
+        ORDER BY dt.created_at DESC, dt.id DESC
+    """)
+    for row in cursor.fetchall():
+        (
+            created_at, firm, from_car, to_car, liter, speedometer_value,
+            from_driver_id, fd_name, fd_surname, from_role,
+            to_driver_id, td_name, td_surname, to_role,
+            approved_by_id, approved_by_name, ab_name, ab_surname,
+            status, note,
+        ) = row
+
+        giver = _report_full_name(fd_name, fd_surname, str(from_car or "-"))
+        receiver = _report_full_name(td_name, td_surname, str(to_car or "-"))
+        approved_by = _report_approved_name(
+            approved_by_id=approved_by_id,
+            approved_by_name=approved_by_name,
+            name=ab_name,
+            surname=ab_surname,
+            fallback="Автоматик" if (status or "").strip() == "Тасдиқланди" and not to_driver_id else ""
+        )
+        if (from_role or "driver") == "driver" and (to_role or "driver") == "driver":
+            report_type = "Ҳайдовчи расход / Ҳайдовчи приход"
+        elif (from_role or "driver") == "driver":
+            report_type = "Ҳайдовчи расход"
+        else:
+            report_type = "Ҳайдовчи приход"
+
+        driver_rows.append([
+            report_type,
+            _report_date(created_at),
+            firm or "",
+            to_car or from_car or "",
+            liter or "",
+            speedometer_value or "",
+            giver,
+            receiver,
+            approved_by,
+            diesel_status_display(status),
+            note or "",
+        ])
+
+    return build_xlsx_file([
+        ("Заправка маълумоти", _technadzor_diesel_summary_rows()),
+        ("Приход ДИЗЕЛ заправшика", zap_prihod_rows),
+        ("Расход ДИЗЕЛ заправшика", zap_rashod_rows),
+        ("Хайдовчилар приход расходи", driver_rows),
+    ])
 
 
 def build_technadzor_remont_report_file():
@@ -7111,6 +7353,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "history_select_car",
             "history_period",
             "technadzor_report_remont_menu",
+            "technadzor_report_diesel_menu",
         ]:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             if mode == "confirm_exit_card":
@@ -7125,11 +7368,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("🔔 Уведомления", reply_markup=technadzor_notifications_keyboard())
                 return
 
+            if mode == "history_period":
+                firm = context.user_data.get("firm")
+                context.user_data.pop("history_car", None)
+                context.user_data["mode"] = "history_select_car"
+
+                await clear_all_inline_messages(context, update.effective_chat.id)
+                await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=back_keyboard())
+                if firm:
+                    msg = await update.message.reply_text("Техникани танланг:", reply_markup=history_car_buttons_by_firm(firm))
+                    remember_inline_message(context, msg)
+                else:
+                    context.user_data["mode"] = "history_select_firm"
+                    await update.message.reply_text("Қайси фирма техникасини кўрмоқчисиз?", reply_markup=firm_back_keyboard())
+                return
+
             if context.user_data.get("history_parent_menu") == "technadzor_report_remont_menu":
                 context.user_data.pop("history_parent_menu", None)
                 context.user_data.pop("history_car", None)
                 context.user_data["mode"] = "technadzor_report_remont_menu"
                 await update.message.reply_text("📋 Отчет Ремонт", reply_markup=technadzor_remont_report_keyboard())
+                return
+
+            if mode in ["technadzor_report_remont_menu", "technadzor_report_diesel_menu"]:
+                context.user_data["mode"] = "technadzor_reports_menu"
+                await update.message.reply_text("📊 Ҳисоботлар менюси", reply_markup=technadzor_reports_keyboard())
                 return
 
             context.user_data["mode"] = "technadzor_history_menu"
@@ -7201,7 +7464,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if text == "⛽ Отчет Дизел":
-                await update.message.reply_text("⛽ Отчет Дизел кейинги босқичда қўшилади.", reply_markup=technadzor_reports_keyboard())
+                context.user_data["mode"] = "technadzor_report_diesel_menu"
+                await update.message.reply_text("⛽ Отчет Дизел", reply_markup=technadzor_diesel_report_keyboard())
                 return
 
             if text == "🟢 Отчет Газ":
@@ -7243,12 +7507,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("Қайси фирма техникасини кўрмоқчисиз?", reply_markup=firm_back_keyboard())
                 return
 
-        if mode == "technadzor_history_menu":
-            if text == "📚 История Ремонт":
-                await clear_all_inline_messages(context, update.effective_chat.id)
-                context.user_data["mode"] = "history_select_firm"
-                await update.message.reply_text("Қайси фирма техникасини кўрмоқчисиз?", reply_markup=firm_back_keyboard())
+        if mode == "technadzor_report_diesel_menu":
+            if text == "📄 EXCEL файл":
+                wait_msg = await update.message.reply_text("⏳ Дизел Excel ҳисоботи тайёрланяпти...")
+                try:
+                    report_file = build_technadzor_diesel_report_file()
+                    filename = f"diesel_hisobot_{datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%Y_%m_%d_%H_%M')}.xlsx"
+                    await update.message.reply_document(
+                        document=InputFile(report_file, filename=filename),
+                        filename=filename,
+                        caption="⛽ Отчет Дизел тайёр.\nTelegram ID ўрнига Фамилия Исми чиқади.",
+                        reply_markup=technadzor_diesel_report_keyboard()
+                    )
+                except Exception as e:
+                    print("TECHNADZOR DIESEL EXCEL REPORT ERROR:", e)
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    await update.message.reply_text(
+                        "❌ Отчет Дизел Excel файлини тайёрлашда хато бўлди. Илтимос, қайта уриниб кўринг.",
+                        reply_markup=technadzor_diesel_report_keyboard()
+                    )
+                try:
+                    await wait_msg.delete()
+                except Exception:
+                    pass
                 return
+
+            if text == "📚 История Дизел":
+                await update.message.reply_text(
+                    "📚 История Дизел менюси кейинги босқичда деталлаштирилади.",
+                    reply_markup=technadzor_diesel_report_keyboard()
+                )
+                return
+
+        if mode == "technadzor_history_menu":
             if text == "⛽ История ГАЗ":
                 await update.message.reply_text("⛽ История ГАЗ кейин ишлаб чиқилади.", reply_markup=technadzor_history_keyboard())
                 return
@@ -9238,7 +9532,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "history_select_car"
 
         await update.message.reply_text("⬅️ Орқага қайтиш учун пастдаги тугмани босинг.", reply_markup=back_keyboard())
-        await update.message.reply_text("Техникани танланг:", reply_markup=history_car_buttons_by_firm(text))
+        msg = await update.message.reply_text("Техникани танланг:", reply_markup=history_car_buttons_by_firm(text))
+        remember_inline_message(context, msg)
         return
 
     if text in FIRM_NAMES:
@@ -10356,10 +10651,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["history_car"] = car
             context.user_data["mode"] = "history_period"
 
-            await query.message.reply_text(
+            msg = await query.message.reply_text(
                 f"🚛 Техника: {car}\n\nҚайси давр бўйича история керак?",
                 reply_markup=history_period_keyboard()
             )
+            remember_inline_message(context, msg)
             return
 
         # REPAIR ADD
@@ -11986,10 +12282,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["history_car"] = car
             context.user_data["mode"] = "history_period"
 
-            await query.message.reply_text(
+            msg = await query.message.reply_text(
                 f"🚛 Техника: {car}\n\nҚайси давр бўйича история керак?",
                 reply_markup=history_period_keyboard()
             )
+            remember_inline_message(context, msg)
             return
 
     # === PRIORITY CAR CALLBACK FIX END ===
@@ -13382,10 +13679,11 @@ async def diesel_rejected_cancel(update: Update, context: ContextTypes.DEFAULT_T
             context.user_data["history_car"] = car
             context.user_data["mode"] = "history_period"
 
-            await query.message.reply_text(
+            msg = await query.message.reply_text(
                 f"🚛 Техника: {car}\n\nҚайси давр бўйича история керак?",
                 reply_markup=history_period_keyboard()
             )
+            remember_inline_message(context, msg)
             return
 
         if mode == "choose_car" or context.user_data.get("operation") == "add":
