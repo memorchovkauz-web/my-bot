@@ -415,11 +415,24 @@ CREATE TABLE IF NOT EXISTS fuel_reports (
     car TEXT,
     fuel_type TEXT,
     km TEXT,
+    gas_m3 TEXT,
     video_id TEXT,
     photo_id TEXT,
     created_at TIMESTAMP DEFAULT NOW()
 )
 """)
+
+
+# V55: fuel_reports таблицасига газ м/3 устунини хавфсиз қўшиш
+try:
+    cursor.execute("ALTER TABLE fuel_reports ADD COLUMN IF NOT EXISTS gas_m3 TEXT")
+    conn.commit()
+except Exception as e:
+    print("fuel_reports gas_m3 alter error:", e)
+    try:
+        conn.rollback()
+    except Exception:
+        pass
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS gas_transfers (
@@ -4968,7 +4981,7 @@ def fuel_gas_edit_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📍 Спидометр", callback_data="fuel_gas_edit_km")],
         [InlineKeyboardButton("🎥 Видео", callback_data="fuel_gas_edit_video")],
-        [InlineKeyboardButton("📷 Расм", callback_data="fuel_gas_edit_photo")],
+        [InlineKeyboardButton("⛽ Газ м/3", callback_data="fuel_gas_edit_photo")],
     ])
 
 
@@ -4979,8 +4992,8 @@ def fuel_gas_confirm_text(context):
         f"🚛 Техника: {context.user_data.get('fuel_car')}\n"
         f"⛽ Ёқилғи тури: {context.user_data.get('fuel_type')}\n"
         f"📍 Спидометр: {context.user_data.get('fuel_km')} км\n"
-        f"🎥 Видео: сақланди ✅\n"
-        f"📷 Расм: сақланди ✅\n\n"
+        f"⛽ Олинган газ: {context.user_data.get('fuel_gas_m3', 'Киритилмаган')} м/3\n"
+        f"🎥 Видео: сақланди ✅\n\n"
         "Маълумот тўғрими?"
     )
 
@@ -5310,7 +5323,7 @@ def driver_gas_report_list_keyboard(user_id, report_type):
     try:
         if report_type == "received":
             cursor.execute("""
-                SELECT id, created_at, car, COALESCE(km, '')
+                SELECT id, created_at, car, COALESCE(gas_m3, '')
                 FROM fuel_reports
                 WHERE telegram_id = %s
                   AND LOWER(COALESCE(fuel_type, '')) = LOWER('Газ')
@@ -5318,11 +5331,11 @@ def driver_gas_report_list_keyboard(user_id, report_type):
             """, (int(user_id),))
             rows = cursor.fetchall()
             keyboard = []
-            for record_id, created_at, car, km in rows:
+            for record_id, created_at, car, gas_m3 in rows:
                 date_text = created_at.strftime("%d.%m") if created_at else "--.--"
                 keyboard.append([
                     InlineKeyboardButton(
-                        f"{date_text} / {car or '-'} / {km or '-'}",
+                        f"{date_text} / {car or '-'} / {gas_m3 or '-'} м/3",
                         callback_data=f"driver_gas_report_card|received|{record_id}"
                     )
                 ])
@@ -5362,7 +5375,7 @@ def driver_gas_report_list_keyboard(user_id, report_type):
 def get_driver_gas_received_report_row(record_id):
     try:
         cursor.execute("""
-            SELECT id, telegram_id, car, fuel_type, km, video_id, photo_id, created_at
+            SELECT id, telegram_id, car, fuel_type, km, COALESCE(gas_m3, ''), video_id, photo_id, created_at
             FROM fuel_reports
             WHERE id = %s
         """, (int(record_id),))
@@ -5412,7 +5425,7 @@ def gas_status_display(status):
 
 
 def driver_gas_received_card_text(row):
-    record_id, telegram_id, car, fuel_type, km, video_id, photo_id, created_at = row
+    record_id, telegram_id, car, fuel_type, km, gas_m3, video_id, photo_id, created_at = row
     created_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else now_text()
     return (
         "📥 ПРИХОД ГАЗ МАЪЛУМОТИ\n\n"
@@ -5420,8 +5433,8 @@ def driver_gas_received_card_text(row):
         f"🚛 Техника: {car or 'Киритилмаган'}\n"
         f"⛽ Ёқилғи тури: {fuel_type or 'Газ'}\n"
         f"📍 Спидометр: {km or 'Киритилмаган'}\n"
+        f"⛽ Олинган газ: {gas_m3 or 'Киритилмаган'} м/3\n"
         f"🎥 Видео: {'сақланди ✅' if video_id else 'йўқ'}\n"
-        f"📷 Расм: {'сақланди ✅' if photo_id else 'йўқ'}\n"
         "📌 Статус: Тасдиқланган\n\n"
         "Маълумотни кўриш учун 👁 Кўриш тугмасини босинг."
     )
@@ -8357,9 +8370,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode == "fuel_gas_photo":
+        if not text.isdigit():
+            await update.message.reply_text(
+                "❌ Нотўғри маълумот киритилди.\n\n"
+                "⛽ Неччи м/3 газ олганингизни фақат сон билан ёзинг.\n"
+                "Мисол: 120"
+            )
+            return
+
+        context.user_data["fuel_gas_m3"] = text
+        context.user_data["mode"] = "fuel_gas_confirm"
         await update.message.reply_text(
-            "❌ Бу босқичда матн қабул қилинмайди.\n\n"
-            "📷 Фақат ведомость расмини юборинг."
+            fuel_gas_confirm_text(context),
+            reply_markup=fuel_gas_after_action_keyboard()
         )
         return
 
@@ -8782,7 +8805,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if mode in ["fuel_gas_video", "fuel_gas_photo"]:
+    if mode == "fuel_gas_edit_photo":
+        if not text.isdigit():
+            await update.message.reply_text(
+                "❌ Нотўғри маълумот киритилди.\n\n"
+                "⛽ Янги газ миқдорини фақат сон билан ёзинг.\n"
+                "Мисол: 120"
+            )
+            return
+
+        context.user_data["fuel_gas_m3"] = text
+        context.user_data["mode"] = "fuel_gas_confirm"
+        await update.message.reply_text(
+            fuel_gas_confirm_text(context),
+            reply_markup=fuel_gas_after_action_keyboard()
+        )
+        return
+
+    if mode in ["fuel_gas_video"]:
         await update.message.reply_text("❌ Бу босқичда матн қабул қилинмайди. Тўғри маълумот юборинг.")
         return
 
@@ -11810,13 +11850,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(fuel_gas_confirm_text(context))
 
         video_id = context.user_data.get("fuel_video_id")
-        photo_id = context.user_data.get("fuel_photo_id")
 
         if video_id:
             await safe_send_video(context.bot, query.message.chat_id, video_id)
-
-        if photo_id:
-            await safe_send_photo(context.bot, query.message.chat_id, photo_id)
 
         await query.message.reply_text(
             "Маълумотни тасдиқлайсизми?",
@@ -11868,7 +11904,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         context.user_data["mode"] = "fuel_gas_edit_photo"
         await query.message.reply_text(
-            "📷 Янги ведомость расмини юборинг."
+            "⛽ Янги олинган газ миқдорини м/3 билан ёзинг.\n\n"
+            "Фақат сон қабул қилинади.\n"
+            "Мисол: 120"
         )
         return
 
@@ -11900,17 +11938,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 car,
                 fuel_type,
                 km,
+                gas_m3,
                 video_id,
                 photo_id
             )
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (
             user_id,
             context.user_data.get("fuel_car"),
             context.user_data.get("fuel_type"),
             context.user_data.get("fuel_km"),
+            context.user_data.get("fuel_gas_m3"),
             context.user_data.get("fuel_video_id"),
-            context.user_data.get("fuel_photo_id")
+            None
         ))
 
         conn.commit()
@@ -14627,12 +14667,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode in ["fuel_gas_photo", "fuel_gas_edit_photo"]:
-        context.user_data["fuel_photo_id"] = update.message.photo[-1].file_id
-        context.user_data["mode"] = "fuel_gas_confirm"
-
         await update.message.reply_text(
-            fuel_gas_confirm_text(context),
-            reply_markup=fuel_gas_after_action_keyboard()
+            "❌ Бу босқичда расм қабул қилинмайди.\n\n"
+            "⛽ Неччи м/3 газ олганингизни фақат сон билан ёзинг.\n"
+            "Мисол: 120"
         )
         return
 
@@ -14898,8 +14936,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode == "fuel_gas_photo":
         await update.message.reply_text(
-            "❌ Бу босқичда фақат ведомость расми қабул қилинади.\n\n"
-            "📷 Ведомостьга қўл қўйиб, расмга олиб юборинг."
+            "❌ Бу босқичда видео қабул қилинмайди.\n\n"
+            "⛽ Неччи м/3 газ олганингизни фақат сон билан ёзинг.\n"
+            "Мисол: 120"
         )
         return
 
@@ -14936,7 +14975,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "✅ Видео сақланди.\n\n"
-            "📷 Энди ведомостьга қўл қўйиб, расмга олиб ташланг."
+            "⛽ Неччи м/3 газ олганингизни ёзинг.\n"
+            "Фақат сон қабул қилинади.\n"
+            "Мисол: 120"
         )
         return
 
