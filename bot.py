@@ -1202,6 +1202,12 @@ def technadzor_diesel_history_period_keyboard():
     ], resize_keyboard=True)
 
 
+def technadzor_main_menu_only_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("🏠 Бош меню")],
+    ], resize_keyboard=True)
+
+
 def get_technadzor_diesel_history_dates(period_key):
     now = datetime.now(TASHKENT_TZ)
     if period_key == "1d":
@@ -6797,6 +6803,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
     current_role = get_role(update)
 
+    # === V51: Текширувчи дизел тарихи карточкасидан Бош менюга хавфсиз қайтиш ===
+    if text == "🏠 Бош меню" and current_role == "technadzor":
+        await clear_all_inline_messages(context, update.effective_chat.id)
+        context.user_data.clear()
+        context.user_data["mode"] = "technadzor_main"
+        await update.message.reply_text("🧑‍🔍 Текширувчи менюси:", reply_markup=technadzor_keyboard())
+        return
+
     # === V22: Заправшик, ҳайдовчи, механик ва текширувчи меню алмашганда
     # юқоридаги эски inline кнопкалар хавфсиз ўчсин ===
     if current_role in ["zapravshik", "driver", "mechanic", "technadzor"] and text in [
@@ -6834,6 +6848,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚗 Ремонтга киритиш",
         "🚗 Ремонтдан чиқариш",
         "📜 Тарих",
+        "🏠 Бош меню",
     ]:
         await clear_all_inline_messages(context, update.effective_chat.id)
 
@@ -7787,6 +7802,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "⛽ Заправщик Дизел тарихи\n"
                     f"📅 Давр: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n\n"
                     "Рўйхат тартиби:\nТехника номери / Фирма / Литр"
+                )
+                await update.message.reply_text(
+                    "✅ Давр танланди. Қуйидаги inline рўйхатдан маълумотни танланг:",
+                    reply_markup=ReplyKeyboardRemove()
                 )
                 msg = await update.message.reply_text(
                     title,
@@ -10051,6 +10070,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=technadzor_diesel_history_view_keyboard(kind, record_id, has_media=has_media)
             )
             remember_inline_message(context, msg)
+
+        try:
+            await query.message.chat.send_message(
+                "🏠 Бош менюга қайтиш учун пастдаги тугмани босинг.",
+                reply_markup=technadzor_main_menu_only_keyboard()
+            )
+        except Exception:
+            pass
         return
 
     if data.startswith("tz_diesel_hist_view|"):
