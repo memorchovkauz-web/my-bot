@@ -8,6 +8,7 @@ import time
 import logging
 import traceback
 import threading
+import queue as queue_module
 import asyncio
 import psycopg2
 from psycopg2.pool import ThreadedConnectionPool
@@ -796,8 +797,74 @@ def sync_drivers_to_db():
     conn.commit()
 
 
+
 sync_drivers_to_db()
 print("DRIVERS SYNCED")
+
+# ================= GOOGLE SHEETS BACKGROUND QUEUE (PERFORMANCE STEP 3) =================
+# Google Sheets API sekin javob bersa ham bot callback/message javoblarini kutdirib qo'ymaslik uchun
+# yozish operatsiyalari alohida background thread orqali bajariladi.
+SHEETS_QUEUE = queue_module.Queue(maxsize=1000)
+SHEETS_WRITE_METHODS = ["append_row", "update", "update_cell", "delete_rows"]
+SHEETS_ORIGINAL_METHODS = {}
+
+
+def _worksheet_key(ws):
+    try:
+        return id(ws)
+    except Exception:
+        return None
+
+
+def enqueue_sheet_task(action_name, func, *args, **kwargs):
+    try:
+        SHEETS_QUEUE.put_nowait((action_name, func, args, kwargs))
+        return True
+    except queue_module.Full:
+        print(f"[SHEETS QUEUE FULL] {action_name} task skipped")
+        return False
+    except Exception as e:
+        print(f"[SHEETS QUEUE ERROR] {action_name}: {e}")
+        return False
+
+
+def _sheets_worker():
+    while True:
+        action_name, func, args, kwargs = SHEETS_QUEUE.get()
+        try:
+            gspread_retry(action_name, lambda: func(*args, **kwargs), attempts=4, base_delay=2)
+        except Exception as e:
+            print(f"[SHEETS BACKGROUND ERROR] {action_name}: {e}")
+        finally:
+            SHEETS_QUEUE.task_done()
+
+
+def _patch_worksheet_for_background_writes(ws, ws_name):
+    key = _worksheet_key(ws)
+    if key is None:
+        return
+    SHEETS_ORIGINAL_METHODS.setdefault(key, {})
+
+    for method_name in SHEETS_WRITE_METHODS:
+        try:
+            original = getattr(ws, method_name)
+            SHEETS_ORIGINAL_METHODS[key][method_name] = original
+
+            def _make_queued_method(_original=original, _method_name=method_name, _ws_name=ws_name):
+                def _queued_method(*args, **kwargs):
+                    return enqueue_sheet_task(f"{_ws_name}.{_method_name}", _original, *args, **kwargs)
+                return _queued_method
+
+            setattr(ws, method_name, _make_queued_method())
+        except Exception as e:
+            print(f"[SHEETS PATCH ERROR] {ws_name}.{method_name}: {e}")
+
+
+threading.Thread(target=_sheets_worker, daemon=True).start()
+_patch_worksheet_for_background_writes(remont_ws, "REMONT")
+_patch_worksheet_for_background_writes(mashina_ws, "MASHINALAR")
+_patch_worksheet_for_background_writes(drivers_ws, "DRIVERS")
+print("SHEETS BACKGROUND QUEUE ENABLED")
 
 FIRM_NAMES = [
     "Мемор Уткир Човка",
