@@ -1136,15 +1136,38 @@ def action_keyboard():
     ], resize_keyboard=True)
 
 
+def technadzor_staff_count(work_role=None):
+    """Текширувчи менюси учун тасдиқланган ходимлар сони."""
+    try:
+        if work_role is None:
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM drivers
+                WHERE TRIM(COALESCE(status, '')) = 'Тасдиқланди'
+            """)
+        else:
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM drivers
+                WHERE COALESCE(work_role, 'driver') = %s
+                  AND TRIM(COALESCE(status, '')) = 'Тасдиқланди'
+            """, (work_role,))
+        row = cursor.fetchone()
+        return int((row or [0])[0] or 0)
+    except Exception as e:
+        print("TECHNADZOR STAFF COUNT ERROR:", e)
+        return 0
+
+
 def technadzor_keyboard():
     total_notifications = pending_registration_count() + pending_repair_exit_count() + pending_diesel_prihod_count()
     notification_text = f"🔔 Уведомления [ {total_notifications} ]" if total_notifications > 0 else "🔔 Уведомления"
+    staff_total = technadzor_staff_count()
 
     return ReplyKeyboardMarkup([
         [KeyboardButton(notification_text)],
         [KeyboardButton("🔧 Ремонтга қўшиш")],
-        [KeyboardButton("👥 Ходимлар")],
-        [KeyboardButton("💾 История")],
+        [KeyboardButton(f"👥 Ходимлар ({staff_total} киши)")],
         [KeyboardButton("📊 Ҳисоботлар")],
     ], resize_keyboard=True)
 
@@ -1779,10 +1802,14 @@ def pending_registration_count():
 
 
 def technadzor_staff_menu_keyboard():
+    drivers_count = technadzor_staff_count("driver")
+    mechanics_count = technadzor_staff_count("mechanic")
+    zapravshik_count = technadzor_staff_count("zapravshik")
+
     return ReplyKeyboardMarkup([
-        [KeyboardButton("🚚 Ҳайдовчилар")],
-        [KeyboardButton("🔧 Механиклар")],
-        [KeyboardButton("⛽ Заправщиклар")],
+        [KeyboardButton(f"🚚 Ҳайдовчилар ({drivers_count} киши)")],
+        [KeyboardButton(f"🔧 Механиклар ({mechanics_count} киши)")],
+        [KeyboardButton(f"⛽ Заправщиклар ({zapravshik_count} киши)")],
         [KeyboardButton("⬅️ Орқага")],
     ], resize_keyboard=True)
 
@@ -8049,10 +8076,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("👥 Ходимлар менюси", reply_markup=technadzor_staff_menu_keyboard())
             return
 
-        if text == "💾 История":
-            context.user_data["mode"] = "technadzor_history_menu"
-            await update.message.reply_text("💾 История", reply_markup=technadzor_history_keyboard())
-            return
+        # 💾 История менюси V57 да текширувчи бош менюсидан олиб ташланди.
 
         if text == "📊 Ҳисоботлар":
             await clear_all_inline_messages(context, update.effective_chat.id)
@@ -10314,7 +10338,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if mode == "technadzor_staff_menu":
-            if text == "🚚 Ҳайдовчилар":
+            if text.startswith("🚚 Ҳайдовчилар"):
                 await clear_technadzor_staff_inline(context, update.effective_chat.id)
                 context.user_data["mode"] = "technadzor_staff_drivers_firm"
                 await update.message.reply_text(
@@ -10323,7 +10347,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-            if text == "🔧 Механиклар":
+            if text.startswith("🔧 Механиклар"):
                 await clear_technadzor_staff_inline(context, update.effective_chat.id)
                 context.user_data["mode"] = "technadzor_staff_mechanics_list"
                 context.user_data["technadzor_staff_type"] = "mechanics"
@@ -10341,7 +10365,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 remember_inline_message(context, msg)
                 return
 
-            if text == "⛽ Заправщиклар":
+            if text.startswith("⛽ Заправщиклар"):
                 await clear_technadzor_staff_inline(context, update.effective_chat.id)
                 context.user_data["mode"] = "technadzor_staff_zapravshik_list"
                 context.user_data["technadzor_staff_type"] = "zapravshik"
