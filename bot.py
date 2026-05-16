@@ -51,6 +51,23 @@ logging.basicConfig(
 logger = logging.getLogger("autobaza-bot")
 
 
+# ================= V63 CALLBACK DEBOUNCE SAFE =================
+# Бир user бир хил inline кнопкани кетма-кет жуда тез босса,
+# Telegram/DB юкламасини камайтириш учун 0.45 секунд ичидаги дубль callback игнор қилинади.
+# Бу flow'ни ўзгартирмайди: фақат double-click/spam босишларни тўхтатади.
+CALLBACK_DEBOUNCE_SECONDS = 0.45
+
+def is_duplicate_callback(context: ContextTypes.DEFAULT_TYPE, data: str) -> bool:
+    now = time.monotonic()
+    last_data = context.user_data.get("_last_callback_data")
+    last_time = context.user_data.get("_last_callback_time", 0)
+
+    context.user_data["_last_callback_data"] = data
+    context.user_data["_last_callback_time"] = now
+
+    return last_data == data and (now - float(last_time or 0)) < CALLBACK_DEBOUNCE_SECONDS
+
+
 # ================= MAINTENANCE / DEPLOY MODE =================
 # Deploy пайтида user'ларга тушунарли хабар бериш учун.
 # ENV: MAINTENANCE_MODE=true бўлса, бот асосий flow'ларни тўхтатиб,
@@ -10795,6 +10812,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "none":
+        return
+
+    # === V63: double-click callback protection ===
+    if is_duplicate_callback(context, data):
         return
 
     # === V50: Текширувчи → Отчет Дизел → История Дизел callbacks ===
