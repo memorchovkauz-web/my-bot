@@ -1196,6 +1196,14 @@ def technadzor_diesel_report_keyboard():
     ], resize_keyboard=True)
 
 
+def technadzor_gas_report_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("📄 EXCEL файл")],
+        [KeyboardButton("📚 История ГАЗ")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
 # ================= V50: TECHNADZOR DIESEL HISTORY REPORT =================
 def technadzor_diesel_history_role_keyboard():
     return ReplyKeyboardMarkup([
@@ -1458,6 +1466,276 @@ async def send_technadzor_diesel_history_media(query, kind, record_id, context):
     await query.message.chat.send_message(
         diesel_transfer_sender_card_text(row, status_text=diesel_status_display(row[9])),
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Орқага", callback_data="tz_diesel_hist_back|list")]])
+    )
+
+
+
+# ================= V56: TECHNADZOR GAS REPORT + HISTORY =================
+def build_technadzor_gas_report_file():
+    prihod_rows = [[
+        "Сана",
+        "Фирма номи",
+        "Техника",
+        "Спидометр",
+        "Олинган газ м/3",
+        "Ким томонидан олинган",
+        "Статус",
+    ]]
+
+    rashod_rows = [[
+        "Сана",
+        "Фирма номи",
+        "Газ берган техника",
+        "Газ олган техника",
+        "Ким томонидан берилган",
+        "Ким томонидан олинган",
+        "Ким тасдиқлаган",
+        "Статус",
+        "Изоҳ",
+    ]]
+
+    try:
+        cursor.execute("""
+            SELECT
+                fr.created_at,
+                fr.telegram_id,
+                fr.car,
+                fr.km,
+                COALESCE(fr.gas_m3, ''),
+                d.name,
+                d.surname,
+                c.firm
+            FROM fuel_reports fr
+            LEFT JOIN drivers d ON d.telegram_id = fr.telegram_id
+            LEFT JOIN cars c ON LOWER(c.car_number) = LOWER(fr.car)
+            WHERE LOWER(COALESCE(fr.fuel_type, '')) = LOWER('Газ')
+            ORDER BY fr.created_at DESC, fr.id DESC
+        """)
+        for created_at, telegram_id, car, km, gas_m3, name, surname, firm in cursor.fetchall():
+            receiver = _report_full_name(name, surname, get_employee_full_name_by_telegram_id(telegram_id) if telegram_id else str(car or "-"))
+            prihod_rows.append([
+                _report_date(created_at),
+                firm or "",
+                car or "",
+                km or "",
+                gas_m3 or "",
+                receiver,
+                "Тасдиқланган",
+            ])
+    except Exception as e:
+        print("TECHNADZOR GAS REPORT PRIHOD ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+    try:
+        cursor.execute("""
+            SELECT
+                gt.created_at,
+                gt.firm,
+                gt.from_car,
+                gt.to_car,
+                gt.from_driver_id,
+                fd.name,
+                fd.surname,
+                gt.to_driver_id,
+                td.name,
+                td.surname,
+                gt.approved_by_id,
+                gt.approved_by_name,
+                ab.name,
+                ab.surname,
+                gt.status,
+                gt.note
+            FROM gas_transfers gt
+            LEFT JOIN drivers fd ON fd.telegram_id = gt.from_driver_id
+            LEFT JOIN drivers td ON td.telegram_id = gt.to_driver_id
+            LEFT JOIN drivers ab ON ab.telegram_id = gt.approved_by_id
+            ORDER BY gt.created_at DESC, gt.id DESC
+        """)
+        for row in cursor.fetchall():
+            (
+                created_at, firm, from_car, to_car,
+                from_driver_id, fd_name, fd_surname,
+                to_driver_id, td_name, td_surname,
+                approved_by_id, approved_by_name, ab_name, ab_surname,
+                status, note,
+            ) = row
+            giver = _report_full_name(fd_name, fd_surname, str(from_car or "-"))
+            receiver = _report_full_name(td_name, td_surname, str(to_car or "-"))
+            approved_by = _report_approved_name(
+                approved_by_id=approved_by_id,
+                approved_by_name=approved_by_name,
+                name=ab_name,
+                surname=ab_surname,
+                fallback="Автоматик" if (status or "").strip() == "Тасдиқланди" and not to_driver_id else ""
+            )
+            rashod_rows.append([
+                _report_date(created_at),
+                firm or "",
+                from_car or "",
+                to_car or "",
+                giver,
+                receiver,
+                approved_by,
+                gas_status_display(status),
+                note or "",
+            ])
+    except Exception as e:
+        print("TECHNADZOR GAS REPORT RASHOD ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+    return build_xlsx_file([
+        ("Приход ГАЗ", prihod_rows),
+        ("Расход ГАЗ", rashod_rows),
+    ])
+
+
+def get_technadzor_gas_history_dates(period_key):
+    return get_technadzor_diesel_history_dates(period_key)
+
+
+def get_technadzor_gas_history_rows(start_date, end_date):
+    """Returns rows: (kind, id, created_at, car, firm, amount, status, has_media)."""
+    rows = []
+    try:
+        cursor.execute("""
+            SELECT
+                fr.id,
+                fr.created_at,
+                fr.car,
+                COALESCE(c.firm, ''),
+                COALESCE(fr.gas_m3, ''),
+                fr.video_id,
+                fr.photo_id
+            FROM fuel_reports fr
+            LEFT JOIN cars c ON LOWER(c.car_number) = LOWER(fr.car)
+            WHERE LOWER(COALESCE(fr.fuel_type, '')) = LOWER('Газ')
+              AND fr.created_at BETWEEN %s AND %s
+            ORDER BY fr.created_at DESC, fr.id DESC
+        """, (start_date, end_date))
+        for record_id, created_at, car, firm, gas_m3, video_id, photo_id in cursor.fetchall():
+            rows.append(("prihod", record_id, created_at, car or "-", firm or "-", gas_m3 or "-", "Тасдиқланган", bool(video_id or photo_id)))
+    except Exception as e:
+        print("TECHNADZOR GAS HISTORY PRIHOD ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+    try:
+        cursor.execute("""
+            SELECT
+                gt.id,
+                gt.created_at,
+                gt.to_car,
+                gt.firm,
+                gt.status,
+                gt.video_id
+            FROM gas_transfers gt
+            WHERE gt.created_at BETWEEN %s AND %s
+            ORDER BY gt.created_at DESC, gt.id DESC
+        """, (start_date, end_date))
+        for record_id, created_at, to_car, firm, status, video_id in cursor.fetchall():
+            rows.append(("rashod", record_id, created_at, to_car or "-", firm or "-", "-", gas_status_display(status), bool(video_id)))
+    except Exception as e:
+        print("TECHNADZOR GAS HISTORY RASHOD ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+    rows.sort(key=lambda item: item[2] or datetime.min.replace(tzinfo=TASHKENT_TZ), reverse=True)
+    return rows
+
+
+def technadzor_gas_history_list_keyboard(start_date, end_date):
+    rows = get_technadzor_gas_history_rows(start_date, end_date)
+    buttons = []
+    for kind, record_id, created_at, car, firm, amount, status, has_media in rows[:80]:
+        sign = "📥" if kind == "prihod" else "📤"
+        amount_text = f"{amount} м/3" if str(amount or "").strip() not in ["", "-"] else "-"
+        title = f"{sign} {car} / {firm} / {amount_text}"[:60]
+        buttons.append([InlineKeyboardButton(title, callback_data=f"tz_gas_hist_card|{kind}|{record_id}")])
+
+    if not buttons:
+        buttons.append([InlineKeyboardButton("❌ Маълумот топилмади", callback_data="none")])
+
+    buttons.append([InlineKeyboardButton("⬅️ Орқага", callback_data="tz_gas_hist_back|period")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def technadzor_gas_history_view_keyboard(kind, record_id, has_media=True):
+    buttons = []
+    if has_media:
+        buttons.append([InlineKeyboardButton("👁 Кўриш", callback_data=f"tz_gas_hist_view|{kind}|{record_id}")])
+    buttons.append([InlineKeyboardButton("⬅️ Орқага", callback_data="tz_gas_hist_back|list")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def get_technadzor_gas_history_card(kind, record_id):
+    if kind == "prihod":
+        row = get_driver_gas_received_report_row(record_id)
+        if not row:
+            return "❌ Маълумот топилмади.", False
+        text = driver_gas_received_card_text(row)
+        has_media = bool(row[6] or row[7])
+        return text, has_media
+
+    row = get_driver_gas_given_report_row(record_id)
+    if not row:
+        return "❌ Маълумот топилмади.", False
+    text = driver_gas_given_card_text(row)
+    has_media = bool(row[6])
+    return text, has_media
+
+
+async def send_technadzor_gas_history_media(query, kind, record_id, context):
+    if kind == "prihod":
+        row = get_driver_gas_received_report_row(record_id)
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+        record_id, telegram_id, car, fuel_type, km, gas_m3, video_id, photo_id, created_at = row
+        if photo_id:
+            try:
+                await query.message.chat.send_photo(photo_id, caption="🖼 Газ приход расми")
+            except Exception:
+                pass
+        if video_id:
+            try:
+                await query.message.chat.send_video_note(video_id)
+            except Exception:
+                try:
+                    await query.message.chat.send_video(video_id, caption="🎥 Газ приход видео")
+                except Exception:
+                    pass
+        await query.message.chat.send_message(
+            driver_gas_received_card_text(row),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Орқага", callback_data="tz_gas_hist_back|list")]])
+        )
+        return
+
+    row = get_driver_gas_given_report_row(record_id)
+    if not row:
+        await query.message.reply_text("❌ Маълумот топилмади.")
+        return
+    video_id = row[6]
+    if video_id:
+        try:
+            await query.message.chat.send_video_note(video_id)
+        except Exception:
+            try:
+                await query.message.chat.send_video(video_id, caption="🎥 Газ расход видео")
+            except Exception:
+                pass
+    await query.message.chat.send_message(
+        driver_gas_given_card_text(row),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Орқага", callback_data="tz_gas_hist_back|list")]])
     )
 
 
@@ -7641,6 +7919,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "history_period",
             "technadzor_report_remont_menu",
             "technadzor_report_diesel_menu",
+            "technadzor_report_gas_menu",
+            "technadzor_gas_history_period",
+            "technadzor_gas_history_custom",
+            "technadzor_gas_history_list",
             "technadzor_diesel_history_role",
             "technadzor_diesel_history_zap_period",
             "technadzor_diesel_history_zap_custom",
@@ -7701,7 +7983,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⛽ Отчет Дизел", reply_markup=technadzor_diesel_report_keyboard())
                 return
 
-            if mode in ["technadzor_report_remont_menu", "technadzor_report_diesel_menu"]:
+            if mode in ["technadzor_gas_history_custom", "technadzor_gas_history_list"]:
+                context.user_data["mode"] = "technadzor_gas_history_period"
+                await update.message.reply_text("📚 История ГАЗ\n\nДаврни танланг:", reply_markup=technadzor_diesel_history_period_keyboard())
+                return
+
+            if mode == "technadzor_gas_history_period":
+                context.user_data["mode"] = "technadzor_report_gas_menu"
+                await update.message.reply_text("🟢 Отчет Газ", reply_markup=technadzor_gas_report_keyboard())
+                return
+
+            if mode in ["technadzor_report_remont_menu", "technadzor_report_diesel_menu", "technadzor_report_gas_menu"]:
                 context.user_data["mode"] = "technadzor_reports_menu"
                 await update.message.reply_text("📊 Ҳисоботлар менюси", reply_markup=technadzor_reports_keyboard())
                 return
@@ -7780,7 +8072,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if text == "🟢 Отчет Газ":
-                await update.message.reply_text("🟢 Отчет Газ кейинги босқичда қўшилади.", reply_markup=technadzor_reports_keyboard())
+                context.user_data["mode"] = "technadzor_report_gas_menu"
+                await update.message.reply_text("🟢 Отчет Газ", reply_markup=technadzor_gas_report_keyboard())
                 return
 
         if mode == "technadzor_report_remont_menu":
@@ -7816,6 +8109,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["mode"] = "history_select_firm"
                 context.user_data["history_parent_menu"] = "technadzor_report_remont_menu"
                 await update.message.reply_text("Қайси фирма техникасини кўрмоқчисиз?", reply_markup=firm_back_keyboard())
+                return
+
+        if mode == "technadzor_report_gas_menu":
+            if text == "📄 EXCEL файл":
+                wait_msg = await update.message.reply_text("⏳ Газ Excel ҳисоботи тайёрланяпти...")
+                try:
+                    report_file = build_technadzor_gas_report_file()
+                    filename = f"gas_hisobot_{datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%Y_%m_%d_%H_%M')}.xlsx"
+                    await update.message.reply_document(
+                        document=InputFile(report_file, filename=filename),
+                        filename=filename,
+                        caption="🟢 Отчет Газ тайёр.\nTelegram ID ўрнига Фамилия Исми чиқади.",
+                        reply_markup=technadzor_gas_report_keyboard()
+                    )
+                except Exception as e:
+                    print("TECHNADZOR GAS EXCEL REPORT ERROR:", e)
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    await update.message.reply_text(
+                        "❌ Отчет Газ Excel файлини тайёрлашда хато бўлди. Илтимос, қайта уриниб кўринг.",
+                        reply_markup=technadzor_gas_report_keyboard()
+                    )
+                try:
+                    await wait_msg.delete()
+                except Exception:
+                    pass
+                return
+
+            if text == "📚 История ГАЗ":
+                await clear_all_inline_messages(context, update.effective_chat.id)
+                context.user_data["mode"] = "technadzor_gas_history_period"
+                await update.message.reply_text(
+                    "📚 История ГАЗ\n\nДаврни танланг:",
+                    reply_markup=technadzor_diesel_history_period_keyboard()
+                )
                 return
 
         if mode == "technadzor_report_diesel_menu":
@@ -8000,6 +8330,72 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📅 Давр: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n\n"
                 "Рўйхат тартиби:\nТехника номери / Фирма / Литр",
                 reply_markup=technadzor_zapravshik_diesel_history_list_keyboard(start_date, end_date)
+            )
+            remember_inline_message(context, msg)
+            return
+
+        if mode == "technadzor_gas_history_period":
+            period_map = {
+                "📅 1 кунлик": "1d",
+                "📅 10 кунлик": "10d",
+                "📅 1 ойлик": "30d",
+            }
+
+            if text in period_map:
+                start_date, end_date = get_technadzor_gas_history_dates(period_map[text])
+                if not start_date or not end_date:
+                    await update.message.reply_text("❌ Давр хатолик.", reply_markup=technadzor_diesel_history_period_keyboard())
+                    return
+
+                context.user_data["mode"] = "technadzor_gas_history_list"
+                context.user_data["technadzor_gas_history_start"] = start_date
+                context.user_data["technadzor_gas_history_end"] = end_date
+                title = (
+                    "📚 История ГАЗ\n"
+                    f"📅 Давр: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n\n"
+                    "Рўйхат тартиби:\nТехника номери / Фирма / Газ м/3"
+                )
+                await update.message.reply_text(
+                    "✅ Давр танланди. Қуйидаги inline рўйхатдан маълумотни танланг:",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+                msg = await update.message.reply_text(
+                    title,
+                    reply_markup=technadzor_gas_history_list_keyboard(start_date, end_date)
+                )
+                remember_inline_message(context, msg)
+                return
+
+            if text == "📆 Санадан-санагача":
+                context.user_data["mode"] = "technadzor_gas_history_custom"
+                await update.message.reply_text(
+                    "📆 Санадан-санагача даврни киритинг.\n\n"
+                    "Мисол: 01.05.2026-15.05.2026",
+                    reply_markup=only_back_keyboard()
+                )
+                return
+
+        if mode == "technadzor_gas_history_custom":
+            start_date, end_date = parse_technadzor_custom_period(text)
+            if not start_date or not end_date:
+                await update.message.reply_text(
+                    "❌ Нотўғри формат.\n\nМисол: 01.05.2026-15.05.2026",
+                    reply_markup=only_back_keyboard()
+                )
+                return
+
+            context.user_data["mode"] = "technadzor_gas_history_list"
+            context.user_data["technadzor_gas_history_start"] = start_date
+            context.user_data["technadzor_gas_history_end"] = end_date
+            await update.message.reply_text(
+                "✅ Давр танланди. Қуйидаги inline рўйхатдан маълумотни танланг:",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            msg = await update.message.reply_text(
+                "📚 История ГАЗ\n"
+                f"📅 Давр: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n\n"
+                "Рўйхат тартиби:\nТехника номери / Фирма / Газ м/3",
+                reply_markup=technadzor_gas_history_list_keyboard(start_date, end_date)
             )
             remember_inline_message(context, msg)
             return
@@ -10303,6 +10699,92 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
         await send_technadzor_diesel_history_media(query, kind, record_id, context)
+        return
+
+    # === V56: Текширувчи → Отчет Газ → История ГАЗ callbacks ===
+    if data.startswith("tz_gas_hist_back|"):
+        target = data.split("|", 1)[1]
+        await clear_all_inline_messages(context, update.effective_chat.id)
+
+        if target == "period":
+            context.user_data["mode"] = "technadzor_gas_history_period"
+            try:
+                await query.message.delete()
+            except Exception:
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+            await query.message.chat.send_message(
+                "📚 История ГАЗ\n\nДаврни танланг:",
+                reply_markup=technadzor_diesel_history_period_keyboard()
+            )
+            return
+
+        if target == "list":
+            start_date = context.user_data.get("technadzor_gas_history_start")
+            end_date = context.user_data.get("technadzor_gas_history_end")
+            if not start_date or not end_date:
+                context.user_data["mode"] = "technadzor_gas_history_period"
+                await query.message.chat.send_message(
+                    "📚 История ГАЗ\n\nДаврни қайта танланг:",
+                    reply_markup=technadzor_diesel_history_period_keyboard()
+                )
+                return
+            context.user_data["mode"] = "technadzor_gas_history_list"
+            title = (
+                "📚 История ГАЗ\n"
+                f"📅 Давр: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n\n"
+                "Рўйхат тартиби:\nТехника номери / Фирма / Газ м/3"
+            )
+            list_markup = technadzor_gas_history_list_keyboard(start_date, end_date)
+            try:
+                await query.edit_message_text(title, reply_markup=list_markup)
+                remember_inline_message(context, query.message)
+            except Exception:
+                msg = await query.message.chat.send_message(title, reply_markup=list_markup)
+                remember_inline_message(context, msg)
+            return
+
+    if data.startswith("tz_gas_hist_card|"):
+        try:
+            _, kind, record_id = data.split("|", 2)
+        except ValueError:
+            await query.message.reply_text("❌ Нотўғри callback маълумоти.")
+            return
+
+        text_card, has_media = get_technadzor_gas_history_card(kind, record_id)
+        context.user_data["mode"] = "technadzor_gas_history_card"
+        try:
+            await query.edit_message_text(
+                text_card,
+                reply_markup=technadzor_gas_history_view_keyboard(kind, record_id, has_media=has_media)
+            )
+            remember_inline_message(context, query.message)
+        except Exception:
+            msg = await query.message.reply_text(
+                text_card,
+                reply_markup=technadzor_gas_history_view_keyboard(kind, record_id, has_media=has_media)
+            )
+            remember_inline_message(context, msg)
+        return
+
+    if data.startswith("tz_gas_hist_view|"):
+        try:
+            _, kind, record_id = data.split("|", 2)
+        except ValueError:
+            await query.message.reply_text("❌ Нотўғри callback маълумоти.")
+            return
+
+        try:
+            await query.message.delete()
+        except Exception:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+        await send_technadzor_gas_history_media(query, kind, record_id, context)
         return
 
     if data.startswith("driver_diesel_report_back|"):
