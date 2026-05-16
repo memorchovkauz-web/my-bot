@@ -1423,7 +1423,10 @@ async def send_technadzor_diesel_history_media(query, kind, record_id, context):
                     await query.message.chat.send_video(video_id, caption="🎥 Дизел приход видео")
                 except Exception:
                     pass
-        await query.message.chat.send_message(diesel_prihod_card_text(context, status=context.user_data.get("diesel_prihod_status") or "-"))
+        await query.message.chat.send_message(
+            diesel_prihod_card_text(context, status=context.user_data.get("diesel_prihod_status") or "-"),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Орқага", callback_data="tz_diesel_hist_back|list")]])
+        )
         return
 
     row = get_diesel_transfer_full_row(record_id)
@@ -1439,7 +1442,10 @@ async def send_technadzor_diesel_history_media(query, kind, record_id, context):
                 await query.message.chat.send_video(video_id, caption="🎥 Дизел расход видео")
             except Exception:
                 pass
-    await query.message.chat.send_message(diesel_transfer_sender_card_text(row, status_text=diesel_status_display(row[9])))
+    await query.message.chat.send_message(
+        diesel_transfer_sender_card_text(row, status_text=diesel_status_display(row[9])),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Орқага", callback_data="tz_diesel_hist_back|list")]])
+    )
 
 
 def pending_repair_exit_count():
