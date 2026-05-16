@@ -340,7 +340,9 @@ except Exception as e:
 # =====================
 # Қисқа TTL cache: менюларда такрорий SELECT'ларни камайтиради.
 # DB структураси ва callback flow ўзгармайди.
-CACHE_TTL_SECONDS = 45
+CACHE_TTL_SECONDS = 90
+# v58: cache TTL'ни бироз оширдик. Бу role/car/staff count каби тез-тез
+# такрорланадиган SELECT'ларни камайтиради. Status/flow logic ўзгармайди.
 _speed_cache = {}
 
 def cache_get(key):
@@ -381,6 +383,16 @@ def clear_driver_cache():
 def clear_car_cache():
     clear_speed_cache("cars:")
     clear_speed_cache("car_type_by_number:")
+    clear_speed_cache("pending:repair_exit_count")
+
+def clear_staff_count_cache():
+    # Ходим status/role ўзгарганда ҳисоб ва keyboard cache янгиланиши учун.
+    clear_speed_cache("staff:count:")
+    clear_speed_cache("keyboard:technadzor_staff_menu")
+    clear_speed_cache("pending:registration_count")
+
+def clear_pending_count_cache():
+    clear_speed_cache("pending:")
 
 
 cursor.execute("""
@@ -1137,7 +1149,12 @@ def action_keyboard():
 
 
 def technadzor_staff_count(work_role=None):
-    """Текширувчи менюси учун тасдиқланган ходимлар сони."""
+    """Текширувчи менюси учун тасдиқланган ходимлар сони. v58 cache."""
+    cache_key = f"staff:count:{work_role or 'all'}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         if work_role is None:
             cursor.execute("""
@@ -1153,9 +1170,13 @@ def technadzor_staff_count(work_role=None):
                   AND TRIM(COALESCE(status, '')) = 'Тасдиқланди'
             """, (work_role,))
         row = cursor.fetchone()
-        return int((row or [0])[0] or 0)
+        return cache_set(cache_key, int((row or [0])[0] or 0))
     except Exception as e:
         print("TECHNADZOR STAFF COUNT ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return 0
 
 
@@ -1763,18 +1784,28 @@ async def send_technadzor_gas_history_media(query, kind, record_id, context):
 
 
 def pending_repair_exit_count():
+    cache_key = "pending:repair_exit_count"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         count = 0
         for row in get_all_cars():
             if len(row) >= 7 and (row[6] or "").strip().lower() == "текширувда":
                 count += 1
-        return count
+        return cache_set(cache_key, count)
     except Exception as e:
         print("PENDING REPAIR EXIT COUNT ERROR:", e)
         return 0
 
 
 def pending_diesel_prihod_count():
+    cache_key = "pending:diesel_prihod_count"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         cursor.execute("""
             SELECT COUNT(*)
@@ -1782,12 +1813,21 @@ def pending_diesel_prihod_count():
             WHERE TRIM(COALESCE(status, '')) = %s
         """, ("Текширувда",))
         row = cursor.fetchone()
-        return int(row[0] or 0)
+        return cache_set(cache_key, int(row[0] or 0))
     except Exception as e:
         print("PENDING DIESEL PRIHOD COUNT ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return 0
 
 def pending_registration_count():
+    cache_key = "pending:registration_count"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         cursor.execute("""
             SELECT COUNT(*)
@@ -1795,23 +1835,32 @@ def pending_registration_count():
             WHERE TRIM(COALESCE(status, '')) = %s
         """, ("Текширувда",))
         row = cursor.fetchone()
-        return int(row[0] or 0)
+        return cache_set(cache_key, int(row[0] or 0))
     except Exception as e:
         print("PENDING REGISTRATION COUNT ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return 0
 
 
 def technadzor_staff_menu_keyboard():
+    cache_key = "keyboard:technadzor_staff_menu"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     drivers_count = technadzor_staff_count("driver")
     mechanics_count = technadzor_staff_count("mechanic")
     zapravshik_count = technadzor_staff_count("zapravshik")
 
-    return ReplyKeyboardMarkup([
+    return cache_set(cache_key, ReplyKeyboardMarkup([
         [KeyboardButton(f"🚚 Ҳайдовчилар ({drivers_count} киши)")],
         [KeyboardButton(f"🔧 Механиклар ({mechanics_count} киши)")],
         [KeyboardButton(f"⛽ Заправщиклар ({zapravshik_count} киши)")],
         [KeyboardButton("⬅️ Орқага")],
-    ], resize_keyboard=True)
+    ], resize_keyboard=True))
 
 
 def technadzor_staff_firms_reply_keyboard():
