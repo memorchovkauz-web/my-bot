@@ -2000,13 +2000,34 @@ def remember_staff_inline_query_message(context, query):
         print("REMEMBER STAFF INLINE QUERY MESSAGE ERROR:", e)
 
 
+def _inline_clear_cache_key(chat_id, message_id):
+    return f"inline_cleared:{int(chat_id)}:{int(message_id)}"
+
+
+def _is_inline_recently_cleared(context, chat_id, message_id, ttl=120):
+    """Telegram API'га бир хил inline keyboard'ни қайта-қайта ўчириш сўровини юбормаслик учун."""
+    try:
+        key = _inline_clear_cache_key(chat_id, message_id)
+        return float(context.bot_data.get(key, 0)) > time.time()
+    except Exception:
+        return False
+
+
+def _mark_inline_cleared(context, chat_id, message_id, ttl=120):
+    try:
+        key = _inline_clear_cache_key(chat_id, message_id)
+        context.bot_data[key] = time.time() + ttl
+    except Exception:
+        pass
+
+
 async def clear_all_inline_messages(context, chat_id):
     try:
         ids = []
-        ids.extend(list(context.user_data.get("all_inline_message_ids", []))[-5:])
+        ids.extend(list(context.user_data.get("all_inline_message_ids", []))[-4:])
 
         bot_data_key = f"all_inline_message_ids:{int(chat_id)}"
-        ids.extend(list(context.bot_data.get(bot_data_key, []))[-5:])
+        ids.extend(list(context.bot_data.get(bot_data_key, []))[-4:])
 
         for key in ["technadzor_staff_message_id", "technadzor_staff_inline_message_id"]:
             value = context.user_data.get(key)
@@ -2022,13 +2043,26 @@ async def clear_all_inline_messages(context, chat_id):
             except Exception:
                 pass
 
-        for msg_id in clean_ids[-8:]:
+        for msg_id in clean_ids[-6:]:
+            if _is_inline_recently_cleared(context, chat_id, msg_id):
+                continue
             try:
                 await context.bot.edit_message_reply_markup(
                     chat_id=chat_id,
                     message_id=msg_id,
                     reply_markup=None
                 )
+                _mark_inline_cleared(context, chat_id, msg_id)
+            except BadRequest as e:
+                text = str(e).lower()
+                if (
+                    "message is not modified" in text
+                    or "message to edit not found" in text
+                    or "message can't be edited" in text
+                ):
+                    _mark_inline_cleared(context, chat_id, msg_id)
+                else:
+                    print("CLEAR ALL INLINE BADREQUEST:", e)
             except Exception:
                 pass
 
@@ -2084,24 +2118,31 @@ async def safe_edit_message_text(query, text_value, reply_markup=None, parse_mod
 
 
 async def safe_clear_inline_keyboard(context, chat_id, message_id):
-    """Inline keyboard'ни хавфсиз ўчиради: хабар топилмаса ҳам бот йиқилмайди."""
+    """Inline keyboard'ни хавфсиз ва тез ўчиради: бир хил хабарга қайта-қайта API сўров кетмайди."""
     try:
         if not chat_id or not message_id:
             return False
+        message_id = int(message_id)
+        if _is_inline_recently_cleared(context, chat_id, message_id):
+            return False
         await context.bot.edit_message_reply_markup(
             chat_id=chat_id,
-            message_id=int(message_id),
+            message_id=message_id,
             reply_markup=None
         )
+        _mark_inline_cleared(context, chat_id, message_id)
         return True
     except BadRequest as e:
-        text = str(e)
+        text = str(e).lower()
         if (
-            "Message is not modified" in text
+            "message is not modified" in text
             or "message to edit not found" in text
             or "message can't be edited" in text
-            or "message is not modified" in text.lower()
         ):
+            try:
+                _mark_inline_cleared(context, chat_id, message_id)
+            except Exception:
+                pass
             return False
         print("SAFE CLEAR INLINE BADREQUEST:", e)
         return False
