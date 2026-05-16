@@ -1183,6 +1183,190 @@ def technadzor_diesel_report_keyboard():
     ], resize_keyboard=True)
 
 
+# ================= V50: TECHNADZOR DIESEL HISTORY REPORT =================
+def technadzor_diesel_history_role_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("⛽ Заправщик")],
+        [KeyboardButton("🚛 Ҳайдовчи")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
+def technadzor_diesel_history_period_keyboard():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("📅 1 кунлик")],
+        [KeyboardButton("📅 10 кунлик")],
+        [KeyboardButton("📅 1 ойлик")],
+        [KeyboardButton("📆 Санадан-санагача")],
+        [KeyboardButton("⬅️ Орқага")],
+    ], resize_keyboard=True)
+
+
+def get_technadzor_diesel_history_dates(period_key):
+    now = datetime.now(TASHKENT_TZ)
+    if period_key == "1d":
+        return now - timedelta(days=1), now
+    if period_key == "10d":
+        return now - timedelta(days=10), now
+    if period_key == "30d":
+        return now - timedelta(days=30), now
+    return None, None
+
+
+def parse_technadzor_custom_period(text):
+    try:
+        raw = (text or "").replace(" ", "")
+        if "-" not in raw:
+            return None, None
+        left, right = raw.split("-", 1)
+        start = datetime.strptime(left, "%d.%m.%Y").replace(tzinfo=TASHKENT_TZ, hour=0, minute=0, second=0)
+        end = datetime.strptime(right, "%d.%m.%Y").replace(tzinfo=TASHKENT_TZ, hour=23, minute=59, second=59)
+        return start, end
+    except Exception:
+        return None, None
+
+
+def get_technadzor_zapravshik_diesel_history_rows(start_date, end_date):
+    """Returns rows: (kind, id, created_at, car, firm, liter, status, has_media)."""
+    rows = []
+    try:
+        cursor.execute("""
+            SELECT
+                dp.id,
+                dp.created_at,
+                dp.liter,
+                dp.note,
+                dp.status,
+                dp.video_id,
+                dp.photo_id
+            FROM diesel_prihod dp
+            LEFT JOIN drivers d ON d.telegram_id = dp.telegram_id
+            WHERE COALESCE(d.work_role, '') = 'zapravshik'
+              AND dp.created_at BETWEEN %s AND %s
+            ORDER BY dp.created_at DESC, dp.id DESC
+        """, (start_date, end_date))
+        for record_id, created_at, liter, note, status, video_id, photo_id in cursor.fetchall():
+            firm, _, _ = parse_diesel_prihod_note(note or "")
+            rows.append(("prihod", record_id, created_at, "Заправщик", firm or "-", liter or 0, status or "", bool(video_id or photo_id)))
+    except Exception as e:
+        print("TECHNADZOR ZAPRAVSHIK DIESEL HISTORY PRIHOD ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+    try:
+        cursor.execute("""
+            SELECT
+                dt.id,
+                dt.created_at,
+                dt.to_car,
+                dt.firm,
+                dt.liter,
+                dt.status,
+                dt.video_id
+            FROM diesel_transfers dt
+            WHERE TRIM(COALESCE(dt.from_car, '')) = 'Заправщик'
+              AND dt.created_at BETWEEN %s AND %s
+            ORDER BY dt.created_at DESC, dt.id DESC
+        """, (start_date, end_date))
+        for record_id, created_at, to_car, firm, liter, status, video_id in cursor.fetchall():
+            rows.append(("rashod", record_id, created_at, to_car or "-", firm or "-", liter or 0, status or "", bool(video_id)))
+    except Exception as e:
+        print("TECHNADZOR ZAPRAVSHIK DIESEL HISTORY RASHOD ERROR:", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+    rows.sort(key=lambda item: item[2] or datetime.min.replace(tzinfo=TASHKENT_TZ), reverse=True)
+    return rows
+
+
+def technadzor_zapravshik_diesel_history_list_keyboard(start_date, end_date):
+    rows = get_technadzor_zapravshik_diesel_history_rows(start_date, end_date)
+    buttons = []
+    for kind, record_id, created_at, car, firm, liter, status, has_media in rows[:80]:
+        sign = "➕" if kind == "prihod" else "➖"
+        liter_text = format_liter(liter) if 'format_liter' in globals() else str(liter or 0)
+        title = f"{sign} {car} / {firm} / {liter_text}л"[:60]
+        buttons.append([InlineKeyboardButton(title, callback_data=f"tz_diesel_hist_card|{kind}|{record_id}")])
+
+    if not buttons:
+        buttons.append([InlineKeyboardButton("❌ Маълумот топилмади", callback_data="none")])
+
+    buttons.append([InlineKeyboardButton("⬅️ Орқага", callback_data="tz_diesel_hist_back|period")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def technadzor_diesel_history_view_keyboard(kind, record_id, has_media=True):
+    buttons = []
+    if has_media:
+        buttons.append([InlineKeyboardButton("👁 Кўриш", callback_data=f"tz_diesel_hist_view|{kind}|{record_id}")])
+    buttons.append([InlineKeyboardButton("⬅️ Орқага", callback_data="tz_diesel_hist_back|list")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def get_technadzor_diesel_history_card(kind, record_id, context=None):
+    if kind == "prihod":
+        if context is None:
+            return "❌ Маълумот топилмади.", False
+        row = diesel_prihod_row_to_context(record_id, context)
+        if not row:
+            return "❌ Маълумот топилмади.", False
+        status = context.user_data.get("diesel_prihod_status") or "-"
+        text = diesel_prihod_card_text(context, status=status)
+        has_media = bool(context.user_data.get("diesel_prihod_video_id") or context.user_data.get("diesel_prihod_photo_id"))
+        return text, has_media
+
+    row = get_diesel_transfer_full_row(record_id)
+    if not row:
+        return "❌ Маълумот топилмади.", False
+    text = diesel_transfer_sender_card_text(row, status_text=diesel_status_display(row[9]))
+    has_media = bool(row[8])
+    return text, has_media
+
+
+async def send_technadzor_diesel_history_media(query, kind, record_id, context):
+    if kind == "prihod":
+        row = diesel_prihod_row_to_context(record_id, context)
+        if not row:
+            await query.message.reply_text("❌ Маълумот топилмади.")
+            return
+        photo_id = context.user_data.get("diesel_prihod_photo_id")
+        video_id = context.user_data.get("diesel_prihod_video_id")
+        if photo_id:
+            try:
+                await query.message.chat.send_photo(photo_id, caption="🖼 Дизел приход расми")
+            except Exception:
+                pass
+        if video_id:
+            try:
+                await query.message.chat.send_video_note(video_id)
+            except Exception:
+                try:
+                    await query.message.chat.send_video(video_id, caption="🎥 Дизел приход видео")
+                except Exception:
+                    pass
+        await query.message.chat.send_message(diesel_prihod_card_text(context, status=context.user_data.get("diesel_prihod_status") or "-"))
+        return
+
+    row = get_diesel_transfer_full_row(record_id)
+    if not row:
+        await query.message.reply_text("❌ Маълумот топилмади.")
+        return
+    video_id = row[8]
+    if video_id:
+        try:
+            await query.message.chat.send_video_note(video_id)
+        except Exception:
+            try:
+                await query.message.chat.send_video(video_id, caption="🎥 Дизел расход видео")
+            except Exception:
+                pass
+    await query.message.chat.send_message(diesel_transfer_sender_card_text(row, status_text=diesel_status_display(row[9])))
+
+
 def pending_repair_exit_count():
     try:
         count = 0
@@ -7354,6 +7538,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "history_period",
             "technadzor_report_remont_menu",
             "technadzor_report_diesel_menu",
+            "technadzor_diesel_history_role",
+            "technadzor_diesel_history_zap_period",
+            "technadzor_diesel_history_zap_custom",
+            "technadzor_diesel_history_zap_list",
         ]:
             await clear_technadzor_staff_inline(context, update.effective_chat.id)
             if mode == "confirm_exit_card":
@@ -7388,6 +7576,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data.pop("history_car", None)
                 context.user_data["mode"] = "technadzor_report_remont_menu"
                 await update.message.reply_text("📋 Отчет Ремонт", reply_markup=technadzor_remont_report_keyboard())
+                return
+
+            if mode in ["technadzor_diesel_history_zap_custom", "technadzor_diesel_history_zap_list"]:
+                context.user_data["mode"] = "technadzor_diesel_history_zap_period"
+                await update.message.reply_text("⛽ Заправщик дизел тарихи\n\nДаврни танланг:", reply_markup=technadzor_diesel_history_period_keyboard())
+                return
+
+            if mode == "technadzor_diesel_history_zap_period":
+                context.user_data["mode"] = "technadzor_diesel_history_role"
+                await update.message.reply_text("📚 История Дизел\n\nҚайси бўлимни кўрмоқчисиз?", reply_markup=technadzor_diesel_history_role_keyboard())
+                return
+
+            if mode == "technadzor_diesel_history_role":
+                context.user_data["mode"] = "technadzor_report_diesel_menu"
+                await update.message.reply_text("⛽ Отчет Дизел", reply_markup=technadzor_diesel_report_keyboard())
                 return
 
             if mode in ["technadzor_report_remont_menu", "technadzor_report_diesel_menu"]:
@@ -7536,11 +7739,91 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if text == "📚 История Дизел":
+                await clear_all_inline_messages(context, update.effective_chat.id)
+                context.user_data["mode"] = "technadzor_diesel_history_role"
                 await update.message.reply_text(
-                    "📚 История Дизел менюси кейинги босқичда деталлаштирилади.",
-                    reply_markup=technadzor_diesel_report_keyboard()
+                    "📚 История Дизел\n\nҚайси бўлимни кўрмоқчисиз?",
+                    reply_markup=technadzor_diesel_history_role_keyboard()
                 )
                 return
+
+        if mode == "technadzor_diesel_history_role":
+            if text == "⛽ Заправщик":
+                context.user_data["mode"] = "technadzor_diesel_history_zap_period"
+                context.user_data["technadzor_diesel_history_target"] = "zapravshik"
+                await update.message.reply_text(
+                    "⛽ Заправщик дизел тарихи\n\nДаврни танланг:",
+                    reply_markup=technadzor_diesel_history_period_keyboard()
+                )
+                return
+
+            if text == "🚛 Ҳайдовчи":
+                context.user_data["mode"] = "technadzor_diesel_history_driver_period"
+                context.user_data["technadzor_diesel_history_target"] = "driver"
+                await update.message.reply_text(
+                    "🚛 Ҳайдовчи дизел тарихи кейинги босқичда деталлаштирилади.\n\nҲозир Заправщик бўлимини танланг.",
+                    reply_markup=technadzor_diesel_history_role_keyboard()
+                )
+                context.user_data["mode"] = "technadzor_diesel_history_role"
+                return
+
+        if mode == "technadzor_diesel_history_zap_period":
+            period_map = {
+                "📅 1 кунлик": "1d",
+                "📅 10 кунлик": "10d",
+                "📅 1 ойлик": "30d",
+            }
+
+            if text in period_map:
+                start_date, end_date = get_technadzor_diesel_history_dates(period_map[text])
+                if not start_date or not end_date:
+                    await update.message.reply_text("❌ Давр хатолик.", reply_markup=technadzor_diesel_history_period_keyboard())
+                    return
+
+                context.user_data["mode"] = "technadzor_diesel_history_zap_list"
+                context.user_data["technadzor_diesel_history_start"] = start_date
+                context.user_data["technadzor_diesel_history_end"] = end_date
+                title = (
+                    "⛽ Заправщик Дизел тарихи\n"
+                    f"📅 Давр: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n\n"
+                    "Рўйхат тартиби:\nТехника номери / Фирма / Литр"
+                )
+                msg = await update.message.reply_text(
+                    title,
+                    reply_markup=technadzor_zapravshik_diesel_history_list_keyboard(start_date, end_date)
+                )
+                remember_inline_message(context, msg)
+                return
+
+            if text == "📆 Санадан-санагача":
+                context.user_data["mode"] = "technadzor_diesel_history_zap_custom"
+                await update.message.reply_text(
+                    "📆 Санадан-санагача даврни киритинг.\n\n"
+                    "Мисол: 01.05.2026-15.05.2026",
+                    reply_markup=only_back_keyboard()
+                )
+                return
+
+        if mode == "technadzor_diesel_history_zap_custom":
+            start_date, end_date = parse_technadzor_custom_period(text)
+            if not start_date or not end_date:
+                await update.message.reply_text(
+                    "❌ Нотўғри формат.\n\nМисол: 01.05.2026-15.05.2026",
+                    reply_markup=only_back_keyboard()
+                )
+                return
+
+            context.user_data["mode"] = "technadzor_diesel_history_zap_list"
+            context.user_data["technadzor_diesel_history_start"] = start_date
+            context.user_data["technadzor_diesel_history_end"] = end_date
+            msg = await update.message.reply_text(
+                "⛽ Заправщик Дизел тарихи\n"
+                f"📅 Давр: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n\n"
+                "Рўйхат тартиби:\nТехника номери / Фирма / Литр",
+                reply_markup=technadzor_zapravshik_diesel_history_list_keyboard(start_date, end_date)
+            )
+            remember_inline_message(context, msg)
+            return
 
         if mode == "technadzor_history_menu":
             if text == "⛽ История ГАЗ":
@@ -9695,6 +9978,97 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "none":
+        return
+
+    # === V50: Текширувчи → Отчет Дизел → История Дизел callbacks ===
+    if data.startswith("tz_diesel_hist_back|"):
+        target = data.split("|", 1)[1]
+        await clear_all_inline_messages(context, update.effective_chat.id)
+
+        if target == "period":
+            context.user_data["mode"] = "technadzor_diesel_history_zap_period"
+            try:
+                await query.message.delete()
+            except Exception:
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+            await query.message.chat.send_message(
+                "⛽ Заправщик дизел тарихи\n\nДаврни танланг:",
+                reply_markup=technadzor_diesel_history_period_keyboard()
+            )
+            return
+
+        if target == "list":
+            start_date = context.user_data.get("technadzor_diesel_history_start")
+            end_date = context.user_data.get("technadzor_diesel_history_end")
+            if not start_date or not end_date:
+                context.user_data["mode"] = "technadzor_diesel_history_zap_period"
+                await query.message.chat.send_message(
+                    "⛽ Заправщик дизел тарихи\n\nДаврни қайта танланг:",
+                    reply_markup=technadzor_diesel_history_period_keyboard()
+                )
+                return
+            context.user_data["mode"] = "technadzor_diesel_history_zap_list"
+            title = (
+                "⛽ Заправщик Дизел тарихи\n"
+                f"📅 Давр: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}\n\n"
+                "Рўйхат тартиби:\nТехника номери / Фирма / Литр"
+            )
+            try:
+                await query.edit_message_text(
+                    title,
+                    reply_markup=technadzor_zapravshik_diesel_history_list_keyboard(start_date, end_date)
+                )
+                remember_inline_message(context, query.message)
+            except Exception:
+                msg = await query.message.chat.send_message(
+                    title,
+                    reply_markup=technadzor_zapravshik_diesel_history_list_keyboard(start_date, end_date)
+                )
+                remember_inline_message(context, msg)
+            return
+
+    if data.startswith("tz_diesel_hist_card|"):
+        try:
+            _, kind, record_id = data.split("|", 2)
+        except ValueError:
+            await query.message.reply_text("❌ Нотўғри callback маълумоти.")
+            return
+
+        text_card, has_media = get_technadzor_diesel_history_card(kind, record_id, context)
+        context.user_data["mode"] = "technadzor_diesel_history_card"
+        try:
+            await query.edit_message_text(
+                text_card,
+                reply_markup=technadzor_diesel_history_view_keyboard(kind, record_id, has_media=has_media)
+            )
+            remember_inline_message(context, query.message)
+        except Exception:
+            msg = await query.message.reply_text(
+                text_card,
+                reply_markup=technadzor_diesel_history_view_keyboard(kind, record_id, has_media=has_media)
+            )
+            remember_inline_message(context, msg)
+        return
+
+    if data.startswith("tz_diesel_hist_view|"):
+        try:
+            _, kind, record_id = data.split("|", 2)
+        except ValueError:
+            await query.message.reply_text("❌ Нотўғри callback маълумоти.")
+            return
+
+        try:
+            await query.message.delete()
+        except Exception:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+        await send_technadzor_diesel_history_media(query, kind, record_id, context)
         return
 
     if data.startswith("driver_diesel_report_back|"):
