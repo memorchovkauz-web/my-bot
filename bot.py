@@ -183,6 +183,40 @@ threading.Thread(target=run_server, daemon=True).start()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# ===== V61 SAFE LOCAL CURSOR HELPERS =====
+from contextlib import contextmanager
+
+@contextmanager
+def get_db_cursor(commit=False):
+    local_conn = None
+    local_cursor = None
+    try:
+        local_conn = psycopg2.connect(DATABASE_URL)
+        local_cursor = local_conn.cursor()
+        yield local_cursor
+        if commit:
+            local_conn.commit()
+    except Exception as e:
+        try:
+            if local_conn:
+                local_conn.rollback()
+        except:
+            pass
+        print(f"DB cursor error: {e}")
+        raise
+    finally:
+        try:
+            if local_cursor:
+                local_cursor.close()
+        except:
+            pass
+        try:
+            if local_conn:
+                local_conn.close()
+        except:
+            pass
+
+
 TASHKENT_TZ = ZoneInfo("Asia/Tashkent")
 
 # ================= DB POOL v17 =================
